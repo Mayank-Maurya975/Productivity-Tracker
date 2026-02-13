@@ -34,6 +34,87 @@ const Dashboard = () => {
   const [dailyGoal, setDailyGoal] = useState(5);
   const [liveActivity, setLiveActivity] = useState([]);
 
+  // Function to calculate streak from check dates
+  const calculateStreak = (checks) => {
+    if (!checks || checks.length === 0) return 0;
+    
+    // Convert checks to dates and sort
+    const dates = checks
+      .map(check => {
+        if (check.seconds) {
+          return new Date(check.seconds * 1000);
+        }
+        return new Date(check);
+      })
+      .sort((a, b) => b - a); // Sort descending (most recent first)
+    
+    let streak = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let expectedDate = new Date(today);
+    
+    for (let i = 0; i < dates.length; i++) {
+      const checkDate = new Date(dates[i]);
+      checkDate.setHours(0, 0, 0, 0);
+      
+      if (i === 0) {
+        // Check if most recent check was today or yesterday
+        const diffDays = Math.floor((today - checkDate) / (1000 * 60 * 60 * 24));
+        if (diffDays === 0 || diffDays === 1) {
+          streak = 1;
+          expectedDate = new Date(checkDate);
+          expectedDate.setDate(expectedDate.getDate() - 1);
+        } else {
+          break; // Streak broken
+        }
+      } else {
+        // Check consecutive days
+        const diffDays = Math.floor((expectedDate - checkDate) / (1000 * 60 * 60 * 24));
+        if (diffDays === 0) {
+          streak++;
+          expectedDate.setDate(expectedDate.getDate() - 1);
+        } else {
+          break; // Streak broken
+        }
+      }
+    }
+    
+    return streak;
+  };
+
+  const calculateLongestStreak = (checks) => {
+    if (!checks || checks.length === 0) return 0;
+    
+    const dates = checks
+      .map(check => {
+        if (check.seconds) {
+          return new Date(check.seconds * 1000);
+        }
+        return new Date(check);
+      })
+      .sort((a, b) => a - b); // Sort ascending
+    
+    let longestStreak = 0;
+    let currentStreak = 1;
+    
+    for (let i = 1; i < dates.length; i++) {
+      const prevDate = new Date(dates[i - 1]);
+      const currDate = new Date(dates[i]);
+      
+      const diffDays = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 1) {
+        currentStreak++;
+      } else if (diffDays > 1) {
+        longestStreak = Math.max(longestStreak, currentStreak);
+        currentStreak = 1;
+      }
+    }
+    
+    return Math.max(longestStreak, currentStreak);
+  };
+
   useEffect(() => {
     if (!user) return;
 
@@ -89,58 +170,44 @@ const Dashboard = () => {
       const habits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const totalChecks = habits.reduce((acc, curr) => acc + (curr.checks?.length || 0), 0);
       
-      // Calculate streaks
+      // Calculate streaks for each habit
       const streaks = habits.map(habit => {
         const checks = habit.checks || [];
-        let currentStreak = 0;
-        let longestStreak = 0;
-        let tempStreak = 0;
+        const currentStreak = calculateStreak(checks);
+        const longestStreak = calculateLongestStreak(checks);
         
-        // Sort checks by date
-        const sortedChecks = checks.sort((a, b) => a.seconds - b.seconds);
-        
-        sortedChecks.forEach((check, index) => {
-          const checkDate = new Date(check.seconds * 1000);
-          const prevDate = index > 0 ? new Date(sortedChecks[index - 1].seconds * 1000) : null;
-          
-          // Check if consecutive days
-          if (prevDate && 
-              Math.abs((checkDate - prevDate) / (1000 * 60 * 60 * 24)) <= 1) {
-            tempStreak++;
-          } else {
-            tempStreak = 1;
-          }
-          
-          longestStreak = Math.max(longestStreak, tempStreak);
-          
-          // Check if last check was today or yesterday
-          const today = new Date();
-          const yesterday = new Date(today);
-          yesterday.setDate(yesterday.getDate() - 1);
-          
-          if (checkDate.toDateString() === today.toDateString() ||
-              checkDate.toDateString() === yesterday.toDateString()) {
-            currentStreak = tempStreak;
-          }
-        });
-        
-        return { ...habit, currentStreak, longestStreak };
+        return { 
+          ...habit, 
+          currentStreak, 
+          longestStreak,
+          checkCount: checks.length 
+        };
       });
 
       setHabitStreaks(streaks);
       
+      // Calculate overall stats
       const totalCurrentStreak = Math.round(
-        streaks.reduce((acc, habit) => acc + habit.currentStreak, 0) / (streaks.length || 1)
+        streaks.reduce((acc, habit) => acc + habit.currentStreak, 0) / Math.max(streaks.length, 1)
       );
       
       const maxStreak = Math.max(...streaks.map(h => h.longestStreak), 0);
+      const completedToday = habits.filter(h => {
+        const checks = h.checks || [];
+        if (checks.length === 0) return false;
+        const lastCheck = checks[checks.length - 1];
+        const lastCheckDate = lastCheck.seconds ? new Date(lastCheck.seconds * 1000) : new Date(lastCheck);
+        const today = new Date();
+        return lastCheckDate.toDateString() === today.toDateString();
+      }).length;
 
       setStats(prev => ({
         ...prev,
         activeHabits: habits.length,
         habitCompletions: totalChecks,
         currentStreak: totalCurrentStreak,
-        longestStreak: maxStreak
+        longestStreak: maxStreak,
+        completedToday: completedToday
       }));
     });
 
@@ -202,7 +269,7 @@ const Dashboard = () => {
       });
       
       // Add to activity log
-      const activityRef = collection(db, 'users', user.uid, 'activity');
+      const activityRef = doc(collection(db, 'users', user.uid, 'activity'));
       await updateDoc(activityRef, {
         message: 'Completed a task',
         type: 'task_complete',
@@ -374,7 +441,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Habit Streaks */}
+          {/* Habit Streaks - Now properly calculating */}
           <div className={`p-6 ${cardClass}`}>
             <div className="flex justify-between items-center mb-6">
               <h3 className="font-bold text-lg text-slate-900 dark:text-white">Habit Streaks</h3>
@@ -404,7 +471,7 @@ const Dashboard = () => {
                       <h4 className="font-semibold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                         {habit.name}
                       </h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{habit.frequency}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{habit.checkCount || 0} checks</p>
                     </div>
                   </div>
                   
@@ -570,10 +637,13 @@ const Dashboard = () => {
                   <div className="flex-1">
                     <p className="text-sm text-slate-900 dark:text-white">{activity.message}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {new Date(activity.timestamp?.seconds * 1000).toLocaleTimeString([], { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                      })}
+                      {activity.timestamp?.seconds 
+                        ? new Date(activity.timestamp.seconds * 1000).toLocaleTimeString([], { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          })
+                        : 'Just now'
+                      }
                     </p>
                   </div>
                 </div>
@@ -619,7 +689,10 @@ const Dashboard = () => {
                 </div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">{notification.message}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  {new Date(notification.timestamp?.seconds * 1000).toLocaleTimeString()}
+                  {notification.timestamp?.seconds 
+                    ? new Date(notification.timestamp.seconds * 1000).toLocaleTimeString()
+                    : 'Just now'
+                  }
                 </p>
               </div>
             ))}
