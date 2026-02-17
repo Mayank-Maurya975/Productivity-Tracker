@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   CheckCircle2, Circle, ArrowRight, Zap, Clock, TrendingUp, 
   Bell, Calendar, Target, Flame, Activity, Award, Star, 
-  ChevronRight, Battery, Trophy, Target as TargetIcon
+  ChevronRight, Battery, Trophy, Target as TargetIcon,
+  BookOpen, Leaf, Coffee, ListTodo, CalendarDays, Goal,
+  Users, Layout, Settings, Flower2, Moon, Sparkles
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
@@ -13,6 +15,7 @@ import {
 } from 'firebase/firestore';
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [stats, setStats] = useState({
     completedTasks: 0,
@@ -33,92 +36,118 @@ const Dashboard = () => {
   const [notifications, setNotifications] = useState([]);
   const [dailyGoal, setDailyGoal] = useState(5);
   const [liveActivity, setLiveActivity] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [routines, setRoutines] = useState([]);
+  const [gardenProgress, setGardenProgress] = useState([]);
 
-  // Function to calculate streak from check dates
-  const calculateStreak = (checks) => {
-    if (!checks || checks.length === 0) return 0;
-    
-    // Convert checks to dates and sort
-    const dates = checks
-      .map(check => {
-        if (check.seconds) {
-          return new Date(check.seconds * 1000);
-        }
-        return new Date(check);
-      })
-      .sort((a, b) => b - a); // Sort descending (most recent first)
-    
-    let streak = 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    let expectedDate = new Date(today);
-    
-    for (let i = 0; i < dates.length; i++) {
-      const checkDate = new Date(dates[i]);
-      checkDate.setHours(0, 0, 0, 0);
-      
-      if (i === 0) {
-        // Check if most recent check was today or yesterday
-        const diffDays = Math.floor((today - checkDate) / (1000 * 60 * 60 * 24));
-        if (diffDays === 0 || diffDays === 1) {
-          streak = 1;
-          expectedDate = new Date(checkDate);
-          expectedDate.setDate(expectedDate.getDate() - 1);
-        } else {
-          break; // Streak broken
-        }
-      } else {
-        // Check consecutive days
-        const diffDays = Math.floor((expectedDate - checkDate) / (1000 * 60 * 60 * 24));
-        if (diffDays === 0) {
-          streak++;
-          expectedDate.setDate(expectedDate.getDate() - 1);
-        } else {
-          break; // Streak broken
-        }
-      }
+  // Tab configuration with colors and icons
+  const tabs = [
+    {
+      id: 'tasks',
+      name: 'Tasks',
+      path: '/tasks',
+      icon: <ListTodo size={24} />,
+      color: 'from-blue-500 to-cyan-500',
+      bgColor: 'bg-blue-500/10',
+      textColor: 'text-blue-600 dark:text-blue-400',
+      borderColor: 'border-blue-500/20',
+      description: 'Manage your daily tasks and to-dos'
+    },
+    {
+      id: 'calendar',
+      name: 'Calendar',
+      path: '/calendar',
+      icon: <CalendarDays size={24} />,
+      color: 'from-purple-500 to-pink-500',
+      bgColor: 'bg-purple-500/10',
+      textColor: 'text-purple-600 dark:text-purple-400',
+      borderColor: 'border-purple-500/20',
+      description: 'Schedule and plan your events'
+    },
+    {
+      id: 'habits',
+      name: 'Habits',
+      path: '/habits',
+      icon: <Activity size={24} />,
+      color: 'from-emerald-500 to-teal-500',
+      bgColor: 'bg-emerald-500/10',
+      textColor: 'text-emerald-600 dark:text-emerald-400',
+      borderColor: 'border-emerald-500/20',
+      description: 'Build and track daily habits'
+    },
+    {
+      id: 'goals',
+      name: 'Goals',
+      path: '/goals',
+      icon: <Target size={24} />,
+      color: 'from-orange-500 to-red-500',
+      bgColor: 'bg-orange-500/10',
+      textColor: 'text-orange-600 dark:text-orange-400',
+      borderColor: 'border-orange-500/20',
+      description: 'Set and achieve your long-term goals'
+    },
+    {
+      id: 'routines',
+      name: 'Routines',
+      path: '/routines',
+      icon: <Clock size={24} />,
+      color: 'from-indigo-500 to-purple-500',
+      bgColor: 'bg-indigo-500/10',
+      textColor: 'text-indigo-600 dark:text-indigo-400',
+      borderColor: 'border-indigo-500/20',
+      description: 'Create and manage your daily routines'
+    },
+    {
+      id: 'streakgarden',
+      name: 'Streak Garden',
+      path: '/streakgarden',
+      icon: <Flower2 size={24} />,
+      color: 'from-green-500 to-emerald-500',
+      bgColor: 'bg-green-500/10',
+      textColor: 'text-green-600 dark:text-green-400',
+      borderColor: 'border-green-500/20',
+      description: 'Watch your progress grow'
+    },
+    {
+      id: 'relaxzone',
+      name: 'Relax Zone',
+      path: '/relaxzone',
+      icon: <Moon size={24} />,
+      color: 'from-violet-500 to-purple-500',
+      bgColor: 'bg-violet-500/10',
+      textColor: 'text-violet-600 dark:text-violet-400',
+      borderColor: 'border-violet-500/20',
+      description: 'Take a break and recharge'
+    },
+    {
+      id: 'reports',
+      name: 'Reports',
+      path: '/reports',
+      icon: <TrendingUp size={24} />,
+      color: 'from-rose-500 to-pink-500',
+      bgColor: 'bg-rose-500/10',
+      textColor: 'text-rose-600 dark:text-rose-400',
+      borderColor: 'border-rose-500/20',
+      description: 'Analyze your productivity'
+    },
+    {
+      id: 'settings',
+      name: 'Settings',
+      path: '/settings',
+      icon: <Settings size={24} />,
+      color: 'from-slate-500 to-gray-500',
+      bgColor: 'bg-slate-500/10',
+      textColor: 'text-slate-600 dark:text-slate-400',
+      borderColor: 'border-slate-500/20',
+      description: 'Customize your experience'
     }
-    
-    return streak;
-  };
-
-  const calculateLongestStreak = (checks) => {
-    if (!checks || checks.length === 0) return 0;
-    
-    const dates = checks
-      .map(check => {
-        if (check.seconds) {
-          return new Date(check.seconds * 1000);
-        }
-        return new Date(check);
-      })
-      .sort((a, b) => a - b); // Sort ascending
-    
-    let longestStreak = 0;
-    let currentStreak = 1;
-    
-    for (let i = 1; i < dates.length; i++) {
-      const prevDate = new Date(dates[i - 1]);
-      const currDate = new Date(dates[i]);
-      
-      const diffDays = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 1) {
-        currentStreak++;
-      } else if (diffDays > 1) {
-        longestStreak = Math.max(longestStreak, currentStreak);
-        currentStreak = 1;
-      }
-    }
-    
-    return Math.max(longestStreak, currentStreak);
-  };
+  ];
 
   useEffect(() => {
     if (!user) return;
 
-    // 1. Subscribe to Tasks (Real-time)
+    // Tasks subscription
     const tasksQuery = query(
       collection(db, 'users', user.uid, 'tasks'),
       orderBy('createdAt', 'desc')
@@ -132,14 +161,12 @@ const Dashboard = () => {
       const total = tasks.length;
       const productivityScore = total === 0 ? 0 : Math.round((completed / total) * 100);
       
-      // Calculate overdue tasks
       const overdue = tasks.filter(task => 
         task.dueDate && 
         !task.completed && 
         new Date(task.dueDate.seconds * 1000) < now
       ).length;
       
-      // Calculate tasks due today/tomorrow
       const upcoming = tasks
         .filter(task => 
           task.dueDate && 
@@ -163,55 +190,93 @@ const Dashboard = () => {
       setRecentTasks(tasks.slice(0, 5));
     });
 
-    // 2. Subscribe to Habits with Streaks
+    // Habits subscription
     const habitsQuery = query(collection(db, 'users', user.uid, 'habits'));
     
     const unsubscribeHabits = onSnapshot(habitsQuery, (snapshot) => {
       const habits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const totalChecks = habits.reduce((acc, curr) => acc + (curr.checks?.length || 0), 0);
       
-      // Calculate streaks for each habit
       const streaks = habits.map(habit => {
         const checks = habit.checks || [];
-        const currentStreak = calculateStreak(checks);
-        const longestStreak = calculateLongestStreak(checks);
+        let currentStreak = 0;
+        let longestStreak = 0;
+        let tempStreak = 0;
         
-        return { 
-          ...habit, 
-          currentStreak, 
-          longestStreak,
-          checkCount: checks.length 
-        };
+        const sortedChecks = checks.sort((a, b) => a.seconds - b.seconds);
+        
+        sortedChecks.forEach((check, index) => {
+          const checkDate = new Date(check.seconds * 1000);
+          const prevDate = index > 0 ? new Date(sortedChecks[index - 1].seconds * 1000) : null;
+          
+          if (prevDate && 
+              Math.abs((checkDate - prevDate) / (1000 * 60 * 60 * 24)) <= 1) {
+            tempStreak++;
+          } else {
+            tempStreak = 1;
+          }
+          
+          longestStreak = Math.max(longestStreak, tempStreak);
+          
+          const today = new Date();
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          
+          if (checkDate.toDateString() === today.toDateString() ||
+              checkDate.toDateString() === yesterday.toDateString()) {
+            currentStreak = tempStreak;
+          }
+        });
+        
+        return { ...habit, currentStreak, longestStreak };
       });
 
       setHabitStreaks(streaks);
       
-      // Calculate overall stats
       const totalCurrentStreak = Math.round(
-        streaks.reduce((acc, habit) => acc + habit.currentStreak, 0) / Math.max(streaks.length, 1)
+        streaks.reduce((acc, habit) => acc + habit.currentStreak, 0) / (streaks.length || 1)
       );
       
       const maxStreak = Math.max(...streaks.map(h => h.longestStreak), 0);
-      const completedToday = habits.filter(h => {
-        const checks = h.checks || [];
-        if (checks.length === 0) return false;
-        const lastCheck = checks[checks.length - 1];
-        const lastCheckDate = lastCheck.seconds ? new Date(lastCheck.seconds * 1000) : new Date(lastCheck);
-        const today = new Date();
-        return lastCheckDate.toDateString() === today.toDateString();
-      }).length;
 
       setStats(prev => ({
         ...prev,
         activeHabits: habits.length,
         habitCompletions: totalChecks,
         currentStreak: totalCurrentStreak,
-        longestStreak: maxStreak,
-        completedToday: completedToday
+        longestStreak: maxStreak
       }));
     });
 
-    // 3. Subscribe to Notifications (Live)
+    // Calendar events subscription
+    const calendarQuery = query(
+      collection(db, 'users', user.uid, 'events'),
+      orderBy('startTime', 'asc'),
+      where('startTime', '>=', new Date())
+    );
+    
+    const unsubscribeCalendar = onSnapshot(calendarQuery, (snapshot) => {
+      const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setCalendarEvents(events.slice(0, 3));
+    });
+
+    // Goals subscription
+    const goalsQuery = query(collection(db, 'users', user.uid, 'goals'));
+    
+    const unsubscribeGoals = onSnapshot(goalsQuery, (snapshot) => {
+      const goalsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setGoals(goalsData.slice(0, 3));
+    });
+
+    // Routines subscription
+    const routinesQuery = query(collection(db, 'users', user.uid, 'routines'));
+    
+    const unsubscribeRoutines = onSnapshot(routinesQuery, (snapshot) => {
+      const routinesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRoutines(routinesData.slice(0, 3));
+    });
+
+    // Notifications subscription
     const notificationsQuery = query(
       collection(db, 'users', user.uid, 'notifications'),
       orderBy('timestamp', 'desc'),
@@ -223,7 +288,7 @@ const Dashboard = () => {
       setNotifications(notifs.slice(0, 5));
     });
 
-    // 4. Subscribe to Activity Log (Live Feed)
+    // Activity subscription
     const activityQuery = query(
       collection(db, 'users', user.uid, 'activity'),
       orderBy('timestamp', 'desc')
@@ -234,20 +299,14 @@ const Dashboard = () => {
       setLiveActivity(activities.slice(0, 8));
     });
 
-    // 5. Simulate live productivity score updates
-    const interval = setInterval(() => {
-      setStats(prev => ({
-        ...prev,
-        productivity: prev.productivity > 95 ? 95 : prev.productivity + 0.5
-      }));
-    }, 30000);
-
     return () => {
       unsubscribeTasks();
       unsubscribeHabits();
+      unsubscribeCalendar();
+      unsubscribeGoals();
+      unsubscribeRoutines();
       unsubscribeNotifications();
       unsubscribeActivity();
-      clearInterval(interval);
     };
   }, [user, dailyGoal]);
 
@@ -269,7 +328,7 @@ const Dashboard = () => {
       });
       
       // Add to activity log
-      const activityRef = doc(collection(db, 'users', user.uid, 'activity'));
+      const activityRef = collection(db, 'users', user.uid, 'activity');
       await updateDoc(activityRef, {
         message: 'Completed a task',
         type: 'task_complete',
@@ -291,10 +350,10 @@ const Dashboard = () => {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              Overview <span className="animate-pulse inline-block ml-2">🚀</span>
+              Dashboard <span className="animate-pulse inline-block ml-2">✨</span>
             </h1>
             <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">
-              Welcome back, <span className="text-slate-900 dark:text-white font-bold">{user?.displayName?.split(' ')[0] || 'User'}</span>. Here's your daily brief.
+              Welcome back, <span className="text-slate-900 dark:text-white font-bold">{user?.displayName?.split(' ')[0] || 'User'}</span>. Here's your productivity hub.
             </p>
           </div>
           
@@ -315,7 +374,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Stats Grid - Enhanced */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         <StatCard 
           title="Tasks Completed" 
@@ -364,303 +423,25 @@ const Dashboard = () => {
         />
       </div>
 
-      {/* Main Dashboard Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column: Focus Progress & Upcoming */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Focus Progress with Animated Progress Bars */}
-          <div className={`p-8 ${cardClass} relative overflow-hidden group`}>
-            <div className="flex justify-between items-center mb-8 relative z-10">
-              <div>
-                <h3 className="font-bold text-xl text-slate-900 dark:text-white">Focus Progress</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Real-time completion tracking</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold px-3 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 rounded-full border border-slate-200 dark:border-white/5 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Live
-                </span>
-                {stats.overdueTasks > 0 && (
-                  <span className="text-xs font-bold px-3 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/20 flex items-center gap-1">
-                    <Clock size={10} /> {stats.overdueTasks} overdue
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-              <div>
-                <div className="flex justify-between text-sm font-bold mb-3 text-slate-700 dark:text-slate-200">
-                  <span>Task Completion Rate</span>
-                  <span className="flex items-center gap-1">
-                    {stats.productivity}% 
-                    {stats.productivity > 70 && <TrendingUp size={12} className="text-emerald-500" />}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-5 overflow-hidden border border-slate-200 dark:border-white/5">
-                  <div 
-                    className="bg-gradient-to-r from-indigo-600 to-blue-500 h-full rounded-full transition-all duration-1000 ease-out relative" 
-                    style={{ width: `${stats.productivity}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite]"></div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-sm font-bold mb-3 text-slate-700 dark:text-slate-200">
-                  <span>Daily Goal Progress</span>
-                  <span>{stats.dailyGoalProgress}%</span>
-                </div>
-                <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-5 overflow-hidden border border-slate-200 dark:border-white/5">
-                  <div 
-                    className="bg-gradient-to-r from-purple-600 to-pink-500 h-full rounded-full transition-all duration-1000 ease-out relative" 
-                    style={{ width: `${stats.dailyGoalProgress}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite]"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-3 gap-4 mt-8">
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 text-center">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{stats.completedTasks}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Completed</div>
-              </div>
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 text-center">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{stats.totalTasks - stats.completedTasks}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Pending</div>
-              </div>
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 text-center">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{stats.overdueTasks}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Overdue</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Habit Streaks - Now properly calculating */}
-          <div className={`p-6 ${cardClass}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white">Habit Streaks</h3>
-              <Link 
-                to="/habits" 
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 transition-colors"
-              >
-                Manage <ChevronRight size={14} />
-              </Link>
-            </div>
-            
-            <div className="space-y-4">
-              {habitStreaks.slice(0, 3).map((habit, index) => (
-                <div 
-                  key={habit.id} 
-                  className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-slate-50 to-white dark:from-white/5 dark:to-white/2 border border-slate-100 dark:border-white/5 hover:border-indigo-200 dark:hover:border-indigo-500/30 transition-all group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                      habit.currentStreak > 0 
-                        ? 'bg-emerald-500/10 text-emerald-500' 
-                        : 'bg-slate-100 dark:bg-white/5 text-slate-400'
-                    }`}>
-                      <Flame size={18} />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                        {habit.name}
-                      </h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{habit.checkCount || 0} checks</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-2xl font-black text-slate-900 dark:text-white">{habit.currentStreak}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">days streak</div>
-                    </div>
-                    <div className="w-12 h-12 rounded-full border-4 border-slate-200 dark:border-white/10 relative">
-                      <div 
-                        className="absolute inset-0 rounded-full border-4 border-emerald-500 border-t-transparent border-r-transparent"
-                        style={{ transform: `rotate(${(habit.currentStreak / 30) * 360}deg)` }}
-                      ></div>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Award size={14} className="text-emerald-500" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              
-              {habitStreaks.length === 0 && (
-                <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Flame size={24} className="text-slate-300 dark:text-slate-600" />
-                  </div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No active habits. Start building streaks!</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Recent Tasks, Deadlines & Activity */}
-        <div className="space-y-6">
-          
-          {/* Recent Tasks with Quick Actions */}
-          <div className={`p-6 ${cardClass}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white">Recent Tasks</h3>
-              <Link 
-                to="/tasks" 
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 transition-colors"
-              >
-                View All <ArrowRight size={14} />
-              </Link>
-            </div>
-            
-            <div className="space-y-3">
-              {recentTasks.map((task) => (
-                <div 
-                  key={task.id}
-                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-white/5 transition-all group border border-transparent hover:border-slate-100 dark:hover:border-white/5"
-                >
-                  <button 
-                    onClick={() => !task.completed && handleCompleteTask(task.id)}
-                    className={`shrink-0 transition-all group-hover:scale-110 ${
-                      task.completed 
-                        ? 'text-emerald-500' 
-                        : 'text-slate-300 dark:text-slate-600 hover:text-emerald-500 dark:hover:text-emerald-400'
-                    }`}
-                  >
-                    {task.completed ? <CheckCircle2 size={20} /> : <Circle size={20} />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold truncate ${
-                      task.completed 
-                        ? 'text-slate-400 line-through' 
-                        : 'text-slate-700 dark:text-slate-200'
-                    }`}>
-                      {task.text}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {task.dueDate && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                          <Clock size={10} />
-                          {new Date(task.dueDate.seconds * 1000).toLocaleDateString()}
-                        </span>
-                      )}
-                      <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                        task.priority === 'High' ? 'bg-red-500/10 text-red-500' :
-                        task.priority === 'Med' ? 'bg-orange-500/10 text-orange-500' :
-                        'bg-emerald-500/10 text-emerald-500'
-                      }`}>
-                        {task.priority}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Upcoming Deadlines */}
-          <div className={`p-6 ${cardClass}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-                <Calendar size={18} />
-                Upcoming Deadlines
-              </h3>
-              <span className="text-xs font-bold px-2 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full">
-                {upcomingDeadlines.length} pending
-              </span>
-            </div>
-            
-            <div className="space-y-3">
-              {upcomingDeadlines.map((task) => (
-                <div 
-                  key={task.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-amber-50 to-transparent dark:from-amber-500/5 border border-amber-100 dark:border-amber-500/20"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
-                      <Clock size={14} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{task.text}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Due {new Date(task.dueDate.seconds * 1000).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => handleCompleteTask(task.id)}
-                    className="text-xs font-bold px-3 py-1 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
-                  >
-                    Done
-                  </button>
-                </div>
-              ))}
-              
-              {upcomingDeadlines.length === 0 && (
-                <div className="text-center py-4">
-                  <Calendar size={24} className="text-slate-300 dark:text-slate-600 mx-auto mb-2" />
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No upcoming deadlines</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Live Activity Feed */}
-          <div className={`p-6 ${cardClass}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-                <Activity size={18} />
-                Live Activity
-              </h3>
-              <span className="text-xs font-bold px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                Live
-              </span>
-            </div>
-            
-            <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
-              {liveActivity.map((activity, index) => (
-                <div 
-                  key={activity.id}
-                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                    {activity.icon || '📝'}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-900 dark:text-white">{activity.message}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {activity.timestamp?.seconds 
-                        ? new Date(activity.timestamp.seconds * 1000).toLocaleTimeString([], { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })
-                        : 'Just now'
-                      }
-                    </p>
-                  </div>
-                </div>
-              ))}
-              
-              {liveActivity.length === 0 && (
-                <div className="text-center py-4">
-                  <Activity size={24} className="text-slate-300 dark:text-slate-600 mx-auto mb-2" />
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No recent activity</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Quick Access Tabs Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {tabs.map((tab) => (
+          <QuickAccessCard 
+            key={tab.id}
+            tab={tab}
+            onClick={() => navigate(tab.path)}
+            data={{
+              tasks: recentTasks,
+              habits: habitStreaks,
+              events: calendarEvents,
+              goals: goals,
+              routines: routines
+            }}
+          />
+        ))}
       </div>
 
-      {/* Notifications Panel (Floating) */}
+      {/* Notifications Panel */}
       {notifications.length > 0 && (
         <div className="fixed bottom-6 right-6 w-80 bg-white dark:bg-black border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 animate-slide-up">
           <div className="p-4 border-b border-slate-100 dark:border-white/5 flex justify-between items-center">
@@ -689,10 +470,7 @@ const Dashboard = () => {
                 </div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">{notification.message}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  {notification.timestamp?.seconds 
-                    ? new Date(notification.timestamp.seconds * 1000).toLocaleTimeString()
-                    : 'Just now'
-                  }
+                  {new Date(notification.timestamp?.seconds * 1000).toLocaleTimeString()}
                 </p>
               </div>
             ))}
@@ -703,7 +481,229 @@ const Dashboard = () => {
   );
 };
 
-// Enhanced Stat Card Component
+// Enhanced Quick Access Card Component
+const QuickAccessCard = ({ tab, onClick, data }) => {
+  const getPreviewContent = () => {
+    switch(tab.id) {
+      case 'tasks':
+        return (
+          <div className="space-y-2">
+            {data.tasks.slice(0, 2).map(task => (
+              <div key={task.id} className="flex items-center gap-2 text-xs">
+                {task.completed ? 
+                  <CheckCircle2 size={12} className="text-emerald-500" /> : 
+                  <Circle size={12} className="text-slate-300" />
+                }
+                <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{task.text}</span>
+                {task.priority && (
+                  <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${
+                    task.priority === 'High' ? 'bg-red-500/10 text-red-500' :
+                    task.priority === 'Med' ? 'bg-orange-500/10 text-orange-500' :
+                    'bg-emerald-500/10 text-emerald-500'
+                  }`}>
+                    {task.priority}
+                  </span>
+                )}
+              </div>
+            ))}
+            {data.tasks.length === 0 && (
+              <p className="text-xs text-slate-400">No tasks yet</p>
+            )}
+          </div>
+        );
+      
+      case 'habits':
+        return (
+          <div className="space-y-2">
+            {data.habits.slice(0, 2).map(habit => (
+              <div key={habit.id} className="flex items-center justify-between text-xs">
+                <span className="text-slate-600 dark:text-slate-400">{habit.name}</span>
+                <div className="flex items-center gap-1">
+                  <Flame size={10} className="text-orange-500" />
+                  <span className="font-bold">{habit.currentStreak || 0}</span>
+                </div>
+              </div>
+            ))}
+            {data.habits.length === 0 && (
+              <p className="text-xs text-slate-400">No active habits</p>
+            )}
+          </div>
+        );
+      
+      case 'calendar':
+        return (
+          <div className="space-y-2">
+            {data.events.slice(0, 2).map(event => (
+              <div key={event.id} className="flex items-center gap-2 text-xs">
+                <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{event.title}</span>
+                <span className="text-slate-400">
+                  {new Date(event.startTime?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))}
+            {data.events.length === 0 && (
+              <p className="text-xs text-slate-400">No upcoming events</p>
+            )}
+          </div>
+        );
+      
+      case 'goals':
+        return (
+          <div className="space-y-2">
+            {data.goals.slice(0, 2).map(goal => (
+              <div key={goal.id} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-600 dark:text-slate-400">{goal.title}</span>
+                  <span className="text-slate-400">{goal.progress || 0}%</span>
+                </div>
+                <div className="w-full h-1 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 rounded-full"
+                    style={{ width: `${goal.progress || 0}%` }}
+                  ></div>
+                </div>
+              </div>
+            ))}
+            {data.goals.length === 0 && (
+              <p className="text-xs text-slate-400">No goals set</p>
+            )}
+          </div>
+        );
+      
+      case 'routines':
+        return (
+          <div className="space-y-2">
+            {data.routines.slice(0, 2).map(routine => (
+              <div key={routine.id} className="flex items-center gap-2 text-xs">
+                <Clock size={10} className="text-indigo-500" />
+                <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{routine.name}</span>
+                <span className="text-slate-400">{routine.time || 'Anytime'}</span>
+              </div>
+            ))}
+            {data.routines.length === 0 && (
+              <p className="text-xs text-slate-400">No routines created</p>
+            )}
+          </div>
+        );
+      
+      case 'streakgarden':
+        return (
+          <div className="flex items-center justify-around py-2">
+            {[1,2,3].map((i) => (
+              <div key={i} className="flex flex-col items-center">
+                <Flower2 size={20} className="text-green-500" />
+                <div className="w-1 h-6 bg-gradient-to-t from-green-500 to-emerald-300 rounded-full mt-1"></div>
+                <span className="text-[8px] text-slate-400 mt-1">Day {i}</span>
+              </div>
+            ))}
+          </div>
+        );
+      
+      case 'relaxzone':
+        return (
+          <div className="flex items-center justify-center gap-4 py-2">
+            <Moon size={20} className="text-violet-500 animate-pulse" />
+            <Sparkles size={20} className="text-purple-500" />
+            <Coffee size={20} className="text-amber-500" />
+          </div>
+        );
+      
+      case 'reports':
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-400">This week</span>
+              <span className="font-bold text-green-500">+12%</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-400">Last week</span>
+              <span className="font-bold text-slate-600">85%</span>
+            </div>
+            <div className="flex gap-1 pt-1">
+              {[40, 60, 45, 70, 85, 65, 90].map((height, i) => (
+                <div key={i} className="flex-1 h-12 bg-slate-100 dark:bg-white/5 rounded-sm relative">
+                  <div 
+                    className="absolute bottom-0 w-full bg-gradient-to-t from-rose-500 to-pink-500 rounded-sm"
+                    style={{ height: `${height}%` }}
+                  ></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      
+      case 'settings':
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-400">Theme</span>
+              <span className="text-slate-400">Dark/Light</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-400">Notifications</span>
+              <span className="text-slate-400">On</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-400">Language</span>
+              <span className="text-slate-400">English</span>
+            </div>
+          </div>
+        );
+      
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div 
+      onClick={onClick}
+      className={`
+        relative overflow-hidden p-6 rounded-2xl 
+        bg-white dark:bg-black 
+        border border-slate-200 dark:border-white/10 
+        hover:border-slate-300 dark:hover:border-white/20
+        shadow-sm hover:shadow-xl hover:-translate-y-1 
+        transition-all duration-300 cursor-pointer group
+      `}
+    >
+      {/* Gradient Background on Hover */}
+      <div className={`absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity duration-500 bg-gradient-to-br ${tab.color}`}></div>
+      
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${tab.bgColor} border ${tab.borderColor} transition-transform group-hover:scale-110 group-hover:rotate-3`}>
+          <div className={tab.textColor}>{tab.icon}</div>
+        </div>
+        <ArrowRight size={18} className="text-slate-400 group-hover:text-indigo-500 transition-all group-hover:translate-x-1" />
+      </div>
+      
+      {/* Title & Description */}
+      <div className="mb-4">
+        <h3 className="font-bold text-lg text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+          {tab.name}
+        </h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{tab.description}</p>
+      </div>
+      
+      {/* Preview Content */}
+      <div className="border-t border-slate-100 dark:border-white/5 pt-4 mt-2">
+        {getPreviewContent()}
+      </div>
+      
+      {/* Footer */}
+      <div className="mt-4 flex items-center justify-between">
+        <span className="text-xs text-slate-400">Click to open</span>
+        <span className={`text-xs font-bold px-2 py-1 rounded-full ${tab.bgColor} ${tab.textColor}`}>
+          View all
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// Stat Card Component
 const StatCard = ({ title, value, icon, color, border, trend, progress }) => (
   <div className={`
     relative overflow-hidden p-5 rounded-2xl 

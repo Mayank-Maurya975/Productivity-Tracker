@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Target, Plus, Trash2, Calendar, CheckCircle2, Flag, RotateCcw, 
-  ChevronRight, ListTodo, Trophy, AlertCircle, Bookmark
+  ChevronRight, ListTodo, Trophy, AlertCircle, Bookmark, X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
@@ -59,7 +59,30 @@ const Goals = () => {
     const text = milestoneInput[goalId];
     if (!text?.trim()) return;
     const goal = goals.find(g => g.id === goalId);
-    const updatedMilestones = [...(goal.milestones || []), { text, completed: false, id: Date.now() }];
+    
+    // Extract day number if exists
+    const dayMatch = text.match(/day\s*(\d+)/i);
+    const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
+    
+    // Check if milestone with this day number already exists
+    if (dayNumber) {
+      const existingMilestone = goal.milestones?.find(m => {
+        const existingDayMatch = m.text.match(/day\s*(\d+)/i);
+        return existingDayMatch && parseInt(existingDayMatch[1]) === dayNumber;
+      });
+      
+      if (existingMilestone) {
+        alert(`Day ${dayNumber} already exists! Please use a different day.`);
+        return;
+      }
+    }
+    
+    const updatedMilestones = [...(goal.milestones || []), { 
+      text, 
+      completed: false, 
+      id: Date.now(),
+      createdAt: new Date().toISOString()
+    }];
     
     await updateDoc(doc(db, 'users', user.uid, 'goals', goalId), { 
       milestones: updatedMilestones 
@@ -81,6 +104,26 @@ const Goals = () => {
       milestones: updatedMilestones,
       progress: newProgress
     });
+  };
+
+  const deleteMilestone = async (goalId, milestoneId, e) => {
+    e.stopPropagation(); // Prevent triggering the parent onClick
+    
+    if (window.confirm("Delete this milestone?")) {
+      const goal = goals.find(g => g.id === goalId);
+      const updatedMilestones = goal.milestones.filter(m => m.id !== milestoneId);
+      
+      // Recalculate progress after deletion
+      const completedCount = updatedMilestones.filter(m => m.completed).length;
+      const newProgress = updatedMilestones.length > 0 
+        ? Math.round((completedCount / updatedMilestones.length) * 100) 
+        : 0;
+
+      await updateDoc(doc(db, 'users', user.uid, 'goals', goalId), { 
+        milestones: updatedMilestones,
+        progress: newProgress
+      });
+    }
   };
 
   const deleteGoal = async (id) => {
@@ -185,12 +228,45 @@ const Goals = () => {
             <div className="space-y-4">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                  <ListTodo size={14} /> Roadmap Milestones
+                 <span className="text-xs font-bold text-slate-500 ml-2">
+                   ({goal.milestones?.filter(m => m.completed).length || 0}/{goal.milestones?.length || 0})
+                 </span>
                </p>
-               <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-2">
-                 {goal.milestones?.map(m => (
-                   <div key={m.id} onClick={() => toggleMilestone(goal.id, m.id)} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-white/5 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors">
-                      {m.completed ? <CheckCircle2 className="text-emerald-500" size={18} /> : <CircleIcon className="text-slate-300" />}
-                      <span className={`text-sm font-bold ${m.completed ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}>{m.text}</span>
+               <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                 {goal.milestones?.sort((a, b) => {
+                   // Sort by day number if available
+                   const dayA = a.text.match(/day\s*(\d+)/i);
+                   const dayB = b.text.match(/day\s*(\d+)/i);
+                   if (dayA && dayB) {
+                     return parseInt(dayA[1]) - parseInt(dayB[1]);
+                   }
+                   return 0;
+                 }).map(m => (
+                   <div 
+                     key={m.id} 
+                     className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-white/5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group/milestone"
+                   >
+                     <div 
+                       onClick={() => toggleMilestone(goal.id, m.id)}
+                       className="flex items-center gap-3 flex-1 cursor-pointer"
+                     >
+                       {m.completed ? 
+                         <CheckCircle2 className="text-emerald-500 shrink-0" size={18} /> : 
+                         <div className="w-[18px] h-[18px] rounded-full border-2 border-slate-300 dark:border-slate-600 shrink-0" />
+                       }
+                       <span className={`text-sm font-bold ${m.completed ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}>
+                         {m.text}
+                       </span>
+                     </div>
+                     
+                     {/* Delete milestone button */}
+                     <button 
+                       onClick={(e) => deleteMilestone(goal.id, m.id, e)}
+                       className="opacity-0 group-hover/milestone:opacity-100 transition-all p-1 hover:bg-rose-500/10 rounded-lg"
+                       title="Delete milestone"
+                     >
+                       <X size={14} className="text-slate-400 hover:text-rose-500" />
+                     </button>
                    </div>
                  ))}
                </div>
@@ -202,10 +278,44 @@ const Goals = () => {
                    value={milestoneInput[goal.id] || ''} 
                    onChange={(e) => setMilestoneInput({ ...milestoneInput, [goal.id]: e.target.value })}
                    onKeyDown={(e) => e.key === 'Enter' && addMilestone(goal.id)}
-                   placeholder="Add a step..." 
+                   placeholder="Add a step... (e.g., Day 5: Complete module)" 
                    className="flex-1 bg-slate-100 dark:bg-white/5 px-4 py-2 rounded-xl text-xs font-bold outline-none border border-transparent focus:border-indigo-500 transition-all" 
                  />
-                 <button onClick={() => addMilestone(goal.id)} className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"><ChevronRight size={18}/></button>
+                 <button onClick={() => addMilestone(goal.id)} className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700">
+                   <ChevronRight size={18}/>
+                 </button>
+               </div>
+               
+               {/* Quick add day buttons */}
+               <div className="flex flex-wrap gap-2 mt-2">
+                 {[1,2,3,4,5,6,7].map(day => {
+                   const dayExists = goal.milestones?.some(m => {
+                     const match = m.text.match(/day\s*(\d+)/i);
+                     return match && parseInt(match[1]) === day;
+                   });
+                   
+                   return (
+                     <button
+                       key={day}
+                       onClick={() => {
+                         if (!dayExists) {
+                           setMilestoneInput({
+                             ...milestoneInput, 
+                             [goal.id]: `Day ${day}: `
+                           });
+                         }
+                       }}
+                       disabled={dayExists}
+                       className={`px-2 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                         dayExists 
+                           ? 'bg-emerald-500/10 text-emerald-500 cursor-not-allowed' 
+                           : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-indigo-500/10 hover:text-indigo-500'
+                       }`}
+                     >
+                       Day {day}
+                     </button>
+                   );
+                 })}
                </div>
             </div>
           </div>
@@ -215,10 +325,5 @@ const Goals = () => {
     </div>
   );
 };
-
-// Simple Circle icon for milestones
-const CircleIcon = ({ className }) => (
-    <div className={`w-[18px] h-[18px] rounded-full border-2 border-current ${className}`} />
-);
 
 export default Goals;
