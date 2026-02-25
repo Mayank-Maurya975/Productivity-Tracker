@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, BarChart, Bar, AreaChart, Area
@@ -8,7 +8,7 @@ import {
   Trash2, CalendarDays, Check, Award, Maximize2, Minimize2, Lock,
   TrendingUp, Target, Zap, Clock, Star, Gem, Crown, Sparkles,
   BarChart3, PieChart as PieChartIcon, LineChart as LineChartIcon,
-  CheckSquare, Calendar, Filter, Settings
+  CheckSquare, Calendar, Filter, Settings, GripVertical
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
@@ -20,8 +20,25 @@ import {
   doc,
   onSnapshot,
   query,
-  writeBatch
+  writeBatch,
+  orderBy
 } from 'firebase/firestore';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#84cc16', '#06b6d4',
@@ -37,6 +54,144 @@ const GRADIENT_COLORS = [
   'from-violet-500 to-purple-500'
 ];
 
+// Sortable Habit Row Component
+const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, todayDay, currentDate, today, onToggle, onRemove }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: habit.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 'auto',
+    opacity: isDragging ? 0.5 : 1,
+    position: 'relative',
+    backgroundColor: isDragging ? 'rgba(99, 102, 241, 0.05)' : 'transparent'
+  };
+
+  const HabitCell = ({ day }) => {
+    const isChecked = habit.checks.includes(day);
+    const isClickable = isCurrentMonth && day === todayDay;
+    const isPast = (isCurrentMonth && day < todayDay) || (currentDate < new Date(today.getFullYear(), today.getMonth(), 1));
+    const isToday = isCurrentMonth && day === todayDay;
+
+    return (
+      <td key={day} className={`py-2 ${isToday ? 'bg-gradient-to-b from-indigo-500/5 via-transparent to-transparent' : ''}`}>
+        <div className="flex justify-center">
+          <button
+            onClick={() => onToggle(habit.id, day)}
+            disabled={!isClickable}
+            className={`
+              relative w-6 h-6 md:w-7 md:h-7 rounded-lg transition-all duration-300 flex items-center justify-center
+              ${isChecked 
+                ? 'scale-100 shadow-lg ring-2 ring-offset-2' 
+                : 'bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/10 dark:to-white/5 scale-90 border border-slate-200 dark:border-white/10'
+              }
+              ${!isClickable 
+                ? (isPast 
+                  ? 'opacity-30 cursor-not-allowed' 
+                  : 'opacity-10 cursor-not-allowed'
+                ) 
+                : 'hover:scale-110 active:scale-95 cursor-pointer hover:shadow-xl hover:ring-2 hover:ring-offset-2'
+              }
+            `}
+            style={{
+              backgroundColor: isChecked ? habit.color : '',
+              boxShadow: isChecked ? `0 8px 32px ${habit.color}40` : '',
+              ringColor: isChecked ? habit.color : '#6366f1'
+            }}
+          >
+            {isChecked ? (
+              <>
+                <Check size={14} className="text-white relative z-10" strokeWidth={4} />
+                <div className="absolute inset-0 bg-white/20 rounded-lg animate-ping opacity-75"></div>
+              </>
+            ) : (
+              !isClickable && isPast && <Lock size={10} className="text-slate-400" />
+            )}
+          </button>
+        </div>
+      </td>
+    );
+  };
+
+  return (
+    <tr 
+      ref={setNodeRef}
+      style={style}
+      className={`group hover:bg-gradient-to-r from-slate-50/50 to-transparent dark:from-white/[0.02] transition-all duration-300 ${isDragging ? 'shadow-xl cursor-grabbing' : ''}`}
+    >
+      <td className="py-4 pl-6 text-sm font-bold text-slate-700 dark:text-slate-200 sticky left-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-slate-50/50 to-slate-50 dark:from-black dark:to-black z-10 border-r border-slate-100 dark:border-white/5">
+        <div className="flex items-center justify-between pr-4">
+          <div className="flex items-center gap-3">
+            <div 
+              {...attributes} 
+              {...listeners}
+              className="cursor-grab active:cursor-grabbing p-1 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors"
+            >
+              <GripVertical size={16} className="text-slate-400" />
+            </div>
+            <div className="relative">
+              <div className="w-3 h-3 rounded-full ring-2 ring-offset-2" style={{ backgroundColor: habit.color, ringColor: habit.color + '40' }} />
+              {index < 3 && (
+                <div className="absolute -top-1 -right-1">
+                  {index === 0 && <Crown size={12} className="text-yellow-500" />}
+                  {index === 1 && <Star size={12} className="text-slate-400" />}
+                  {index === 2 && <Gem size={12} className="text-orange-400" />}
+                </div>
+              )}
+            </div>
+            <div>
+              <span className="truncate">{habit.name}</span>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {habit.checks.length} days
+                </span>
+                <div className="w-16 h-1 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-white/10 dark:to-white/20 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full rounded-full transition-all duration-1000"
+                    style={{ 
+                      width: `${Math.round((habit.checks.length / daysInMonthArray.length) * 100)}%`,
+                      background: `linear-gradient(90deg, ${habit.color}80, ${habit.color})`
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={() => onRemove(habit.id)}
+            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all p-2 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </td>
+      {daysInMonthArray.map(day => (
+        <HabitCell key={day} day={day} />
+      ))}
+      <td className="py-4 pr-6 text-right sticky right-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-transparent to-slate-50/50 dark:from-black dark:to-black z-10 border-l border-slate-100 dark:border-white/5">
+        <div className="flex items-center justify-end gap-3">
+          <div className="text-right">
+            <p className="text-sm font-black text-slate-900 dark:text-white">
+              {Math.round((habit.checks.length / daysInMonthArray.length) * 100)}%
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{habit.checks.length}/{daysInMonthArray.length}</p>
+          </div>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/5 dark:to-white/10">
+            <TrendingUp size={16} className="text-slate-600 dark:text-slate-400" />
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+};
+
 const Habits = () => {
   const { user } = useAuth();
   const [habits, setHabits] = useState([]);
@@ -47,6 +202,9 @@ const Habits = () => {
   const [activeView, setActiveView] = useState('matrix');
   const [selectedHabit, setSelectedHabit] = useState(null);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  const tableContainerRef = useRef(null);
 
   const daysInMonthCount = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
   const daysInMonthArray = Array.from({ length: daysInMonthCount }, (_, i) => i + 1);
@@ -56,14 +214,39 @@ const Habits = () => {
   const isCurrentMonth = currentDate.getMonth() === today.getMonth() && 
                          currentDate.getFullYear() === today.getFullYear();
 
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'users', user.uid, 'habits'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, [user]);
+  // Configure sensors for drag and drop
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Minimum drag distance before activation
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+ useEffect(() => {
+  if (!user) return;
+  
+  // Remove orderBy temporarily until index is created
+  const q = query(
+    collection(db, 'users', user.uid, 'habits')
+    // Remove orderBy for now
+  );
+  
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    console.log('Fetched habits:', snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const habitsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Sort by order field client-side for now
+    habitsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+    setHabits(habitsData);
+  }, (error) => {
+    console.error('Error fetching habits:', error);
+  });
+  
+  return () => unsubscribe();
+}, [user]);
 
   const handleMonthChange = (direction) => {
     setIsAnimating(true);
@@ -75,12 +258,18 @@ const Habits = () => {
     e.preventDefault();
     if (!habitInput.trim()) return;
     setIsAnimating(true);
+    
+    // Get the highest order number
+    const maxOrder = habits.reduce((max, habit) => Math.max(max, habit.order || 0), -1);
+    
     await addDoc(collection(db, 'users', user.uid, 'habits'), {
       name: habitInput,
       color: selectedColor,
       checks: [],
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      order: maxOrder + 1 // Add order field for sorting
     });
+    
     setHabitInput("");
     setSelectedColor(COLORS[(COLORS.indexOf(selectedColor) + 1) % COLORS.length]);
     setTimeout(() => setIsAnimating(false), 300);
@@ -113,6 +302,32 @@ const Habits = () => {
     });
     await batch.commit();
     setTimeout(() => setIsAnimating(false), 500);
+  };
+
+  // Handle drag end event
+  const handleDragEnd = async (event) => {
+    setIsDragging(false);
+    const { active, over } = event;
+    
+    if (active.id !== over.id) {
+      const oldIndex = habits.findIndex((h) => h.id === active.id);
+      const newIndex = habits.findIndex((h) => h.id === over.id);
+      
+      const newHabits = arrayMove(habits, oldIndex, newIndex);
+      setHabits(newHabits);
+      
+      // Update order in Firebase
+      const batch = writeBatch(db);
+      newHabits.forEach((habit, index) => {
+        const habitRef = doc(db, 'users', user.uid, 'habits', habit.id);
+        batch.update(habitRef, { order: index });
+      });
+      await batch.commit();
+    }
+  };
+
+  const handleDragStart = () => {
+    setIsDragging(true);
   };
 
   const currentStreak = useMemo(() => {
@@ -203,49 +418,6 @@ const Habits = () => {
       ))}
     </div>
   );
-
-  const HabitCell = ({ habit, day, isClickable, isPast, isToday }) => {
-    const isChecked = habit.checks.includes(day);
-    
-    return (
-      <td key={day} className={`py-2 ${isToday ? 'bg-gradient-to-b from-indigo-500/5 via-transparent to-transparent' : ''}`}>
-        <div className="flex justify-center">
-          <button
-            onClick={() => toggleCheck(habit.id, day)}
-            disabled={!isClickable}
-            className={`
-              relative w-6 h-6 md:w-7 md:h-7 rounded-lg transition-all duration-300 flex items-center justify-center
-              ${isChecked 
-                ? 'scale-100 shadow-lg ring-2 ring-offset-2' 
-                : 'bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/10 dark:to-white/5 scale-90 border border-slate-200 dark:border-white/10'
-              }
-              ${!isClickable 
-                ? (isPast 
-                  ? 'opacity-30 cursor-not-allowed' 
-                  : 'opacity-10 cursor-not-allowed'
-                ) 
-                : 'hover:scale-110 active:scale-95 cursor-pointer hover:shadow-xl hover:ring-2 hover:ring-offset-2'
-              }
-            `}
-            style={{
-              backgroundColor: isChecked ? habit.color : '',
-              boxShadow: isChecked ? `0 8px 32px ${habit.color}40` : '',
-              ringColor: isChecked ? habit.color : '#6366f1'
-            }}
-          >
-            {isChecked ? (
-              <>
-                <Check size={14} className="text-white relative z-10" strokeWidth={4} />
-                <div className="absolute inset-0 bg-white/20 rounded-lg animate-ping opacity-75"></div>
-              </>
-            ) : (
-              !isClickable && isPast && <Lock size={10} className="text-slate-400" />
-            )}
-          </button>
-        </div>
-      </td>
-    );
-  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-24 md:pb-10 text-slate-900 dark:text-white px-2 md:px-0">
@@ -453,7 +625,7 @@ const Habits = () => {
           </div>
         </div>
 
-        {/* ADD HABIT FORM - FIXED VISIBILITY */}
+        {/* ADD HABIT FORM */}
         <div className={`${containerClass} p-6 relative overflow-hidden`}>
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/5 to-transparent animate-[shimmer_2s_infinite]" />
           <div className="relative z-10">
@@ -504,12 +676,12 @@ const Habits = () => {
           </div>
         </div>
 
-        {/* HABIT MATRIX */}
+        {/* HABIT MATRIX WITH DRAG AND DROP */}
         <div className={`${containerClass} p-0 overflow-hidden`}>
           <div className="p-6 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-black text-slate-900 dark:text-white">Habit Matrix</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Track your daily consistency</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Track your daily consistency • Drag to reorder</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold px-3 py-1 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5 text-emerald-600 dark:text-emerald-400 rounded-full">
@@ -521,12 +693,21 @@ const Habits = () => {
             </div>
           </div>
           
-          <div className="overflow-x-auto custom-scrollbar">
+          <div 
+            ref={tableContainerRef}
+            className="overflow-x-auto custom-scrollbar"
+            style={{ 
+              maxHeight: 'calc(100vh - 400px)',
+              overflowY: 'auto',
+              scrollBehavior: isDragging ? 'auto' : 'smooth'
+            }}
+          >
             <table className="w-full border-collapse min-w-[800px]">
-              <thead>
+              <thead className="sticky top-0 z-30">
                 <tr className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 border-b border-slate-200 dark:border-white/10">
                   <th className="text-left py-5 pl-6 min-w-[200px] sticky left-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 z-20 text-xs font-black text-slate-500 uppercase border-r border-slate-200 dark:border-white/10">
                     <div className="flex items-center gap-2">
+                      <GripVertical size={14} className="opacity-50" />
                       <CheckSquare size={14} />
                       Habit Name
                     </div>
@@ -554,84 +735,45 @@ const Habits = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                {habits.map((habit, index) => (
-                  <tr 
-                    key={habit.id} 
-                    className="group hover:bg-gradient-to-r from-slate-50/50 to-transparent dark:from-white/[0.02] transition-all duration-300"
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={habits.map(h => h.id)}
+                    strategy={verticalListSortingStrategy}
                   >
-                    <td className="py-4 pl-6 text-sm font-bold text-slate-700 dark:text-slate-200 sticky left-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-slate-50/50 to-slate-50 dark:from-black dark:to-black z-10 border-r border-slate-100 dark:border-white/5">
-                      <div className="flex items-center justify-between pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <div className="w-3 h-3 rounded-full ring-2 ring-offset-2" style={{ backgroundColor: habit.color, ringColor: habit.color + '40' }} />
-                            {index < 3 && (
-                              <div className="absolute -top-1 -right-1">
-                                {index === 0 && <Crown size={12} className="text-yellow-500" />}
-                                {index === 1 && <Star size={12} className="text-slate-400" />}
-                                {index === 2 && <Gem size={12} className="text-orange-400" />}
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <span className="truncate">{habit.name}</span>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs text-slate-500 dark:text-slate-400">
-                                {habit.checks.length} days
-                              </span>
-                              <div className="w-16 h-1 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-white/10 dark:to-white/20 rounded-full overflow-hidden">
-                                <div 
-                                  className="h-full rounded-full transition-all duration-1000"
-                                  style={{ 
-                                    width: `${Math.round((habit.checks.length / daysInMonthCount) * 100)}%`,
-                                    background: `linear-gradient(90deg, ${habit.color}80, ${habit.color})`
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => removeHabit(habit.id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all p-2 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                    {daysInMonthArray.map(day => {
-                      const isClickable = isCurrentMonth && day === todayDay;
-                      const isPast = (isCurrentMonth && day < todayDay) || (currentDate < new Date(today.getFullYear(), today.getMonth(), 1));
-                      const isToday = isCurrentMonth && day === todayDay;
-                      
-                      return (
-                        <HabitCell 
-                          key={day}
-                          habit={habit}
-                          day={day}
-                          isClickable={isClickable}
-                          isPast={isPast}
-                          isToday={isToday}
-                        />
-                      );
-                    })}
-                    <td className="py-4 pr-6 text-right sticky right-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-transparent to-slate-50/50 dark:from-black dark:to-black z-10 border-l border-slate-100 dark:border-white/5">
-                      <div className="flex items-center justify-end gap-3">
-                        <div className="text-right">
-                          <p className="text-sm font-black text-slate-900 dark:text-white">
-                            {Math.round((habit.checks.length / daysInMonthCount) * 100)}%
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">{habit.checks.length}/{daysInMonthCount}</p>
-                        </div>
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/5 dark:to-white/10">
-                          <TrendingUp size={16} className="text-slate-600 dark:text-slate-400" />
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                    {habits.map((habit, index) => (
+                      <SortableHabitRow
+                        key={habit.id}
+                        habit={habit}
+                        index={index}
+                        daysInMonthArray={daysInMonthArray}
+                        isCurrentMonth={isCurrentMonth}
+                        todayDay={todayDay}
+                        currentDate={currentDate}
+                        today={today}
+                        onToggle={toggleCheck}
+                        onRemove={removeHabit}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </tbody>
             </table>
           </div>
+          
+          {/* Drag instruction */}
+          {habits.length > 1 && (
+            <div className="p-3 text-center border-t border-slate-200 dark:border-white/10 bg-gradient-to-b from-transparent to-slate-50/50 dark:to-white/[0.02]">
+              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center justify-center gap-2">
+                <GripVertical size={12} />
+                Drag the <GripVertical size={12} /> handle to reorder habits
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -892,7 +1034,7 @@ const Habits = () => {
                   <Crown size={20} className="text-purple-500" />
                   <span className="text-sm font-bold text-slate-900 dark:text-white">Master Habit</span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-4-00">{topHabit.checks.length}+ days</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{topHabit.checks.length}+ days</p>
               </div>
             )}
           </div>
