@@ -459,7 +459,7 @@ const Login = () => {
             </button>
             <div className="flex items-center justify-center gap-2 text-[11px] font-bold text-white/60 py-2">
               <ShieldCheck size={12} className="text-white" />
-              <span>Secure Cloud Sync • No credit card required</span>
+              <span>Secure Cloud Sync </span>
             </div>
           </div>
           <div className="mt-8 pt-6 border-t border-white/20 text-center">

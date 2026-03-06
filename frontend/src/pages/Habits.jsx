@@ -8,7 +8,7 @@ import {
   Trash2, CalendarDays, Check, Award, Maximize2, Minimize2, Lock,
   TrendingUp, Target, Zap, Clock, Star, Gem, Crown, Sparkles,
   BarChart3, PieChart as PieChartIcon, LineChart as LineChartIcon,
-  CheckSquare, Calendar, Filter, Settings, GripVertical
+  CheckSquare, Calendar, Filter, Settings, GripVertical, Edit2, X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
@@ -45,17 +45,96 @@ const COLORS = [
   '#10b981', '#f97316', '#a855f7'
 ];
 
-const GRADIENT_COLORS = [
-  'from-indigo-500 to-purple-500',
-  'from-rose-500 to-pink-500',
-  'from-orange-500 to-yellow-500',
-  'from-emerald-500 to-teal-500',
-  'from-blue-500 to-cyan-500',
-  'from-violet-500 to-purple-500'
-];
+// Helper function to get month key in YYYY-M format (no leading zero)
+const getMonthKey = (date) => {
+  return `${date.getFullYear()}-${date.getMonth() + 1}`;
+};
+
+// Edit Habit Modal Component
+const EditHabitModal = ({ habit, isOpen, onClose, onSave }) => {
+  const [name, setName] = useState(habit?.name || '');
+  const [color, setColor] = useState(habit?.color || COLORS[0]);
+
+  useEffect(() => {
+    if (habit) {
+      setName(habit.name);
+      setColor(habit.color);
+    }
+  }, [habit]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-zinc-900 rounded-[32px] max-w-md w-full p-6 border border-slate-200 dark:border-white/10 shadow-2xl animate-in zoom-in">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-black text-slate-900 dark:text-white">Edit Habit</h3>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 dark:hover:bg-white/10 rounded-xl transition-colors"
+          >
+            <X size={20} className="text-slate-500" />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <label className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2 block">
+              Habit Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-4 py-3 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white font-bold"
+              placeholder="Enter habit name"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2 block">
+              Color
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  className={`w-8 h-8 rounded-lg transition-all hover:scale-110 hover:shadow-lg ${
+                    color === c ? 'ring-2 ring-offset-2 ring-slate-900 dark:ring-white scale-110 shadow-lg' : ''
+                  }`}
+                  style={{ backgroundColor: c }}
+                >
+                  {color === c && <Check size={14} className="text-white mx-auto" strokeWidth={3} />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 border border-slate-200 dark:border-white/10 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => onSave(habit.id, name, color)}
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl hover:shadow-lg hover:scale-105 transition-all"
+            >
+              Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Sortable Habit Row Component
-const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, todayDay, currentDate, today, onToggle, onRemove }) => {
+const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, todayDay, currentDate, today, onToggle, onRemove, onEdit }) => {
+  const [isHovered, setIsHovered] = useState(false);
+  
   const {
     attributes,
     listeners,
@@ -63,22 +142,31 @@ const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, toda
     transform,
     transition,
     isDragging
-  } = useSortable({ id: habit.id });
+  } = useSortable({ 
+    id: habit.id,
+    animateLayoutChanges: () => false,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition || 'transform 200ms ease',
     zIndex: isDragging ? 50 : 'auto',
     opacity: isDragging ? 0.5 : 1,
     position: 'relative',
-    backgroundColor: isDragging ? 'rgba(99, 102, 241, 0.05)' : 'transparent'
+    backgroundColor: isDragging ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
+    cursor: isDragging ? 'grabbing' : 'default'
   };
 
   const HabitCell = ({ day }) => {
-    const isChecked = habit.checks.includes(day);
-    const isClickable = isCurrentMonth && day === todayDay;
-    const isPast = (isCurrentMonth && day < todayDay) || (currentDate < new Date(today.getFullYear(), today.getMonth(), 1));
+    const monthKey = getMonthKey(currentDate);
+    const currentMonthChecks = habit.monthlyData?.[monthKey] || [];
+    
+    // Handle both string and number values in checks array
+    const isChecked = currentMonthChecks.some(check => Number(check) === day);
+    
     const isToday = isCurrentMonth && day === todayDay;
+    const isPast = day < todayDay && isCurrentMonth;
+    const isClickable = isCurrentMonth && day === todayDay;
 
     return (
       <td key={day} className={`py-2 ${isToday ? 'bg-gradient-to-b from-indigo-500/5 via-transparent to-transparent' : ''}`}>
@@ -87,13 +175,13 @@ const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, toda
             onClick={() => onToggle(habit.id, day)}
             disabled={!isClickable}
             className={`
-              relative w-6 h-6 md:w-7 md:h-7 rounded-lg transition-all duration-300 flex items-center justify-center
+              relative w-6 h-6 md:w-7 md:h-7 rounded-lg transition-all duration-200 flex items-center justify-center
               ${isChecked 
                 ? 'scale-100 shadow-lg ring-2 ring-offset-2' 
-                : 'bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/10 dark:to-white/5 scale-90 border border-slate-200 dark:border-white/10'
+                : 'bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/10 dark:to-white/5 border border-slate-200 dark:border-white/10'
               }
               ${!isClickable 
-                ? (isPast 
+                ? (isPast || !isCurrentMonth
                   ? 'opacity-30 cursor-not-allowed' 
                   : 'opacity-10 cursor-not-allowed'
                 ) 
@@ -102,67 +190,70 @@ const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, toda
             `}
             style={{
               backgroundColor: isChecked ? habit.color : '',
-              boxShadow: isChecked ? `0 8px 32px ${habit.color}40` : '',
+              boxShadow: isChecked ? `0 4px 12px ${habit.color}40` : '',
               ringColor: isChecked ? habit.color : '#6366f1'
             }}
           >
-            {isChecked ? (
-              <>
-                <Check size={14} className="text-white relative z-10" strokeWidth={4} />
-                <div className="absolute inset-0 bg-white/20 rounded-lg animate-ping opacity-75"></div>
-              </>
-            ) : (
-              !isClickable && isPast && <Lock size={10} className="text-slate-400" />
-            )}
+            {isChecked && <Check size={14} className="text-white relative z-10" strokeWidth={4} />}
+            {!isChecked && !isClickable && isPast && <Lock size={10} className="text-slate-400" />}
           </button>
         </div>
       </td>
     );
   };
 
+  const monthKey = getMonthKey(currentDate);
+  const currentMonthChecks = habit.monthlyData?.[monthKey] || [];
+  const totalChecks = currentMonthChecks.length;
+  const percentage = daysInMonthArray.length > 0 ? Math.round((totalChecks / daysInMonthArray.length) * 100) : 0;
+
   return (
     <tr 
       ref={setNodeRef}
       style={style}
-      className={`group hover:bg-gradient-to-r from-slate-50/50 to-transparent dark:from-white/[0.02] transition-all duration-300 ${isDragging ? 'shadow-xl cursor-grabbing' : ''}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`group hover:bg-gradient-to-r from-slate-50/50 to-transparent dark:from-white/[0.02] transition-all duration-200 ${isDragging ? 'shadow-xl' : ''}`}
     >
-      <td className="py-4 pl-6 text-sm font-bold text-slate-700 dark:text-slate-200 sticky left-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-slate-50/50 to-slate-50 dark:from-black dark:to-black z-10 border-r border-slate-100 dark:border-white/5">
+      <td className="py-4 pl-4 text-sm font-bold text-slate-700 dark:text-slate-200 sticky left-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-slate-50/50 to-slate-50 dark:from-black dark:to-black z-10 border-r border-slate-100 dark:border-white/5">
         <div className="flex items-center justify-between pr-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <div 
               {...attributes} 
               {...listeners}
-              className="cursor-grab active:cursor-grabbing p-1 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors"
+              className="cursor-grab active:cursor-grabbing p-1 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors touch-none"
             >
               <GripVertical size={16} className="text-slate-400" />
             </div>
             <div className="relative">
               <div className="w-3 h-3 rounded-full ring-2 ring-offset-2" style={{ backgroundColor: habit.color, ringColor: habit.color + '40' }} />
-              {index < 3 && (
-                <div className="absolute -top-1 -right-1">
-                  {index === 0 && <Crown size={12} className="text-yellow-500" />}
-                  {index === 1 && <Star size={12} className="text-slate-400" />}
-                  {index === 2 && <Gem size={12} className="text-orange-400" />}
-                </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="truncate max-w-[150px]">{habit.name}</span>
+              {isHovered && (
+                <button
+                  onClick={() => onEdit(habit)}
+                  className="p-1 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <Edit2 size={14} className="text-slate-400" />
+                </button>
               )}
             </div>
-            <div>
-              <span className="truncate">{habit.name}</span>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {habit.checks.length} days
-                </span>
-                <div className="w-16 h-1 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-white/10 dark:to-white/20 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full rounded-full transition-all duration-1000"
-                    style={{ 
-                      width: `${Math.round((habit.checks.length / daysInMonthArray.length) * 100)}%`,
-                      background: `linear-gradient(90deg, ${habit.color}80, ${habit.color})`
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+          </div>
+        </div>
+      </td>
+      {daysInMonthArray.map(day => (
+        <HabitCell key={day} day={day} />
+      ))}
+      <td className="py-4 pr-4 text-right sticky right-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-transparent to-slate-50/50 dark:from-black dark:to-black z-10 border-l border-slate-100 dark:border-white/5">
+        <div className="flex items-center justify-end gap-2">
+          <div className="text-right">
+            <p className="text-sm font-black text-slate-900 dark:text-white">
+              {percentage}%
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {totalChecks}/{daysInMonthArray.length}
+            </p>
           </div>
           <button 
             onClick={() => onRemove(habit.id)}
@@ -172,25 +263,50 @@ const SortableHabitRow = ({ habit, index, daysInMonthArray, isCurrentMonth, toda
           </button>
         </div>
       </td>
-      {daysInMonthArray.map(day => (
-        <HabitCell key={day} day={day} />
-      ))}
-      <td className="py-4 pr-6 text-right sticky right-0 bg-white dark:bg-black group-hover:bg-gradient-to-r from-transparent to-slate-50/50 dark:from-black dark:to-black z-10 border-l border-slate-100 dark:border-white/5">
-        <div className="flex items-center justify-end gap-3">
-          <div className="text-right">
-            <p className="text-sm font-black text-slate-900 dark:text-white">
-              {Math.round((habit.checks.length / daysInMonthArray.length) * 100)}%
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{habit.checks.length}/{daysInMonthArray.length}</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-50 dark:from-white/5 dark:to-white/10">
-            <TrendingUp size={16} className="text-slate-600 dark:text-slate-400" />
-          </div>
-        </div>
-      </td>
     </tr>
   );
 };
+
+// Custom Tooltip Components
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 shadow-2xl">
+        <p className="text-xs font-bold text-slate-300 mb-1">Day {label}</p>
+        <p className="text-sm font-bold text-white">{Math.round(payload[0].value)}% completion</p>
+      </div>
+    );
+  }
+  return null;
+};
+
+const CustomPieTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 shadow-2xl">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: payload[0].payload.color }} />
+          <p className="text-sm font-bold text-white">{payload[0].payload.name}</p>
+        </div>
+        <p className="text-2xl font-black text-white">{payload[0].value} days</p>
+        <p className="text-xs text-slate-400">{payload[0].payload.percentage}% of total</p>
+      </div>
+    );
+  }
+  return null;
+};
+
+const CustomLegend = ({ payload }) => (
+  <div className="flex flex-wrap justify-center gap-2 mt-4">
+    {payload.map((entry, index) => (
+      <div key={index} className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 px-2 py-1 bg-white/50 dark:bg-black/50 backdrop-blur-sm rounded-lg border border-slate-200 dark:border-white/10">
+        <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: entry.color }} />
+        <span className="font-black">{entry.payload.value}</span>
+        <span className="text-slate-400">days</span>
+      </div>
+    ))}
+  </div>
+);
 
 const Habits = () => {
   const { user } = useAuth();
@@ -200,7 +316,8 @@ const Habits = () => {
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
   const [isBoldCharts, setIsBoldCharts] = useState(false);
   const [activeView, setActiveView] = useState('matrix');
-  const [selectedHabit, setSelectedHabit] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingHabit, setEditingHabit] = useState(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   
@@ -214,11 +331,10 @@ const Habits = () => {
   const isCurrentMonth = currentDate.getMonth() === today.getMonth() && 
                          currentDate.getFullYear() === today.getFullYear();
 
-  // Configure sensors for drag and drop
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8, // Minimum drag distance before activation
+        distance: 5,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -226,27 +342,27 @@ const Habits = () => {
     })
   );
 
- useEffect(() => {
-  if (!user) return;
-  
-  // Remove orderBy temporarily until index is created
-  const q = query(
-    collection(db, 'users', user.uid, 'habits')
-    // Remove orderBy for now
-  );
-  
-  const unsubscribe = onSnapshot(q, (snapshot) => {
-    console.log('Fetched habits:', snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    const habitsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    // Sort by order field client-side for now
-    habitsData.sort((a, b) => (a.order || 0) - (b.order || 0));
-    setHabits(habitsData);
-  }, (error) => {
-    console.error('Error fetching habits:', error);
-  });
-  
-  return () => unsubscribe();
-}, [user]);
+  useEffect(() => {
+    if (!user) return;
+    
+    const q = query(
+      collection(db, 'users', user.uid, 'habits'),
+      orderBy('order', 'asc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const habitsData = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        monthlyData: doc.data().monthlyData || {}
+      }));
+      setHabits(habitsData);
+    }, (error) => {
+      console.error('Error fetching habits:', error);
+    });
+    
+    return () => unsubscribe();
+  }, [user]);
 
   const handleMonthChange = (direction) => {
     setIsAnimating(true);
@@ -259,15 +375,15 @@ const Habits = () => {
     if (!habitInput.trim()) return;
     setIsAnimating(true);
     
-    // Get the highest order number
     const maxOrder = habits.reduce((max, habit) => Math.max(max, habit.order || 0), -1);
     
     await addDoc(collection(db, 'users', user.uid, 'habits'), {
       name: habitInput,
       color: selectedColor,
-      checks: [],
+      monthlyData: {},
       createdAt: new Date().toISOString(),
-      order: maxOrder + 1 // Add order field for sorting
+      order: maxOrder + 1,
+      lastUpdated: new Date().toISOString()
     });
     
     setHabitInput("");
@@ -282,29 +398,71 @@ const Habits = () => {
     setTimeout(() => setIsAnimating(false), 300);
   };
 
+  const editHabit = (habit) => {
+    setEditingHabit(habit);
+    setIsEditModalOpen(true);
+  };
+
+  const saveHabitEdit = async (id, newName, newColor) => {
+    if (!newName.trim()) return;
+    
+    await updateDoc(doc(db, 'users', user.uid, 'habits', id), {
+      name: newName,
+      color: newColor,
+      lastUpdated: new Date().toISOString()
+    });
+    
+    setIsEditModalOpen(false);
+    setEditingHabit(null);
+  };
+
   const toggleCheck = async (habitId, day) => {
     if (!isCurrentMonth || day !== todayDay) return;
+    
     setIsAnimating(true);
     const habit = habits.find(h => h.id === habitId);
     if (!habit) return;
-    const isChecked = habit.checks.includes(day);
-    const newChecks = isChecked ? habit.checks.filter(d => d !== day) : [...habit.checks, day];
-    await updateDoc(doc(db, 'users', user.uid, 'habits', habitId), { checks: newChecks });
+    
+    const monthKey = getMonthKey(currentDate);
+    const currentMonthChecks = habit.monthlyData?.[monthKey] || [];
+    const isChecked = currentMonthChecks.some(check => Number(check) === day);
+    
+    const newMonthChecks = isChecked 
+      ? currentMonthChecks.filter(d => Number(d) !== day) 
+      : [...currentMonthChecks, day];
+    
+    await updateDoc(doc(db, 'users', user.uid, 'habits', habitId), { 
+      monthlyData: {
+        ...habit.monthlyData,
+        [monthKey]: newMonthChecks.sort((a, b) => Number(a) - Number(b))
+      },
+      lastUpdated: new Date().toISOString()
+    });
+    
     setTimeout(() => setIsAnimating(false), 200);
   };
 
   const resetAllHabits = async () => {
-    if (!window.confirm("RESET ALL HISTORY? This cannot be undone.")) return;
+    if (!window.confirm(`RESET ALL CHECKS FOR ${currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}? This cannot be undone.`)) return;
     setIsAnimating(true);
+    
+    const monthKey = getMonthKey(currentDate);
     const batch = writeBatch(db);
+    
     habits.forEach(habit => {
-      batch.update(doc(db, 'users', user.uid, 'habits', habit.id), { checks: [] });
+      batch.update(doc(db, 'users', user.uid, 'habits', habit.id), { 
+        monthlyData: {
+          ...habit.monthlyData,
+          [monthKey]: []
+        },
+        lastUpdated: new Date().toISOString()
+      });
     });
+    
     await batch.commit();
     setTimeout(() => setIsAnimating(false), 500);
   };
 
-  // Handle drag end event
   const handleDragEnd = async (event) => {
     setIsDragging(false);
     const { active, over } = event;
@@ -316,12 +474,15 @@ const Habits = () => {
       const newHabits = arrayMove(habits, oldIndex, newIndex);
       setHabits(newHabits);
       
-      // Update order in Firebase
       const batch = writeBatch(db);
       newHabits.forEach((habit, index) => {
         const habitRef = doc(db, 'users', user.uid, 'habits', habit.id);
-        batch.update(habitRef, { order: index });
+        batch.update(habitRef, { 
+          order: index,
+          lastUpdated: new Date().toISOString()
+        });
       });
+      
       await batch.commit();
     }
   };
@@ -330,99 +491,108 @@ const Habits = () => {
     setIsDragging(true);
   };
 
+  const monthKey = getMonthKey(currentDate);
+  
   const currentStreak = useMemo(() => {
     if (habits.length === 0) return 0;
-    const allChecks = new Set(habits.flatMap(h => h.checks));
+    
+    const allChecks = new Set();
+    habits.forEach(habit => {
+      const checks = habit.monthlyData?.[monthKey] || [];
+      checks.forEach(day => allChecks.add(Number(day)));
+    });
+    
     let streak = 0;
-    let checkDay = todayDay;
+    let checkDay = daysInMonthCount;
+    
     while (checkDay > 0) {
-      if (allChecks.has(checkDay)) { streak++; checkDay--; } 
-      else { if (checkDay === todayDay && streak === 0) { checkDay--; continue; } break; }
+      if (allChecks.has(checkDay)) {
+        streak++;
+        checkDay--;
+      } else {
+        break;
+      }
     }
     return streak;
-  }, [habits, todayDay]);
+  }, [habits, monthKey, daysInMonthCount]);
 
   const topHabit = useMemo(() => {
     if (habits.length === 0) return null;
-    return habits.reduce((prev, curr) => (prev.checks.length > curr.checks.length) ? prev : curr);
-  }, [habits]);
+    
+    return habits.reduce((prev, curr) => {
+      const prevChecks = prev.monthlyData?.[monthKey]?.length || 0;
+      const currChecks = curr.monthlyData?.[monthKey]?.length || 0;
+      return prevChecks > currChecks ? prev : curr;
+    });
+  }, [habits, monthKey]);
 
-  const completionRate = habits.length > 0 ? Math.round((habits.reduce((acc, h) => acc + h.checks.length, 0) / (habits.length * daysInMonthCount)) * 100) : 0;
+  const completionRate = useMemo(() => {
+    if (habits.length === 0) return 0;
+    
+    const totalChecks = habits.reduce((acc, h) => acc + (h.monthlyData?.[monthKey]?.length || 0), 0);
+    const maxPossible = habits.length * daysInMonthCount;
+    return Math.round((totalChecks / maxPossible) * 100) || 0;
+  }, [habits, monthKey, daysInMonthCount]);
 
   const lineData = useMemo(() => {
-    return daysInMonthArray.map(day => ({
-      day,
-      value: habits.length > 0 ? (habits.filter(h => h.checks.includes(day)).length / habits.length) * 100 : 0,
-      date: new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toLocaleDateString('en-US', { weekday: 'short' })
-    }));
-  }, [habits, daysInMonthArray, currentDate]);
+    return daysInMonthArray.map(day => {
+      const habitsChecked = habits.filter(h => {
+        const checks = h.monthlyData?.[monthKey] || [];
+        return checks.some(check => Number(check) === day);
+      }).length;
+      
+      return {
+        day,
+        value: habits.length > 0 ? (habitsChecked / habits.length) * 100 : 0,
+        date: new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toLocaleDateString('en-US', { weekday: 'short' })
+      };
+    });
+  }, [habits, monthKey, daysInMonthArray, currentDate]);
 
   const pieData = useMemo(() => {
-    const totalChecks = habits.reduce((acc, h) => acc + h.checks.length, 0);
-    return habits.map(h => ({ 
-      name: h.name, 
-      value: h.checks.length || 0.01,
-      percentage: totalChecks > 0 ? Math.round((h.checks.length / totalChecks) * 100) : 0,
-      color: h.color 
-    }));
-  }, [habits]);
+    const totalChecks = habits.reduce((acc, h) => acc + (h.monthlyData?.[monthKey]?.length || 0), 0);
+    
+    return habits.map(h => {
+      const checks = h.monthlyData?.[monthKey]?.length || 0;
+      return { 
+        name: h.name, 
+        value: checks || 0.01,
+        percentage: totalChecks > 0 ? Math.round((checks / totalChecks) * 100) : 0,
+        color: h.color 
+      };
+    });
+  }, [habits, monthKey]);
 
   const barData = useMemo(() => {
-    return habits.map(h => ({
-      name: h.name.length > 8 ? h.name.substring(0, 8) + '...' : h.name,
-      checks: h.checks.length,
-      color: h.color,
-      rate: Math.round((h.checks.length / daysInMonthCount) * 100)
-    })).sort((a, b) => b.checks - a.checks).slice(0, 5);
-  }, [habits, daysInMonthCount]);
+    return habits.map(h => {
+      const checks = h.monthlyData?.[monthKey]?.length || 0;
+      return {
+        name: h.name.length > 8 ? h.name.substring(0, 8) + '...' : h.name,
+        checks: checks,
+        color: h.color,
+        rate: Math.round((checks / daysInMonthCount) * 100) || 0
+      };
+    })
+    .sort((a, b) => b.checks - a.checks)
+    .slice(0, 5);
+  }, [habits, monthKey, daysInMonthCount]);
 
   const containerClass = "bg-white dark:bg-black border border-slate-200 dark:border-white/10 rounded-[24px] shadow-sm transition-all duration-300 hover:shadow-xl hover:border-slate-300 dark:hover:border-white/20";
-
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 shadow-2xl">
-          <p className="text-xs font-bold text-slate-300 mb-1">Day {label}</p>
-          <p className="text-sm font-bold text-white">{payload[0].value}% completion</p>
-          <p className="text-xs text-slate-400 mt-1">{habits.filter(h => h.checks.includes(label)).length} of {habits.length} habits</p>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  const CustomPieTooltip = ({ active, payload }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 shadow-2xl">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: payload[0].payload.color }} />
-            <p className="text-sm font-bold text-white">{payload[0].payload.name}</p>
-          </div>
-          <p className="text-2xl font-black text-white">{payload[0].value} days</p>
-          <p className="text-xs text-slate-400">{payload[0].payload.percentage}% of total</p>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  const CustomLegend = ({ payload }) => (
-    <div className="flex flex-wrap justify-center gap-2 mt-4">
-      {payload.map((entry, index) => (
-        <div key={index} className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 px-2 py-1 bg-white/50 dark:bg-black/50 backdrop-blur-sm rounded-lg border border-slate-200 dark:border-white/10">
-          <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: entry.color }} />
-          <span className="font-black">{entry.payload.value}</span>
-          <span className="text-slate-400">days</span>
-        </div>
-      ))}
-    </div>
-  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-24 md:pb-10 text-slate-900 dark:text-white px-2 md:px-0">
       
-      {/* HEADER WITH ANIMATED BACKGROUND */}
+      <EditHabitModal 
+        habit={editingHabit}
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingHabit(null);
+        }}
+        onSave={saveHabitEdit}
+      />
+      
+      {/* HEADER */}
       <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-pink-500/5 dark:from-indigo-500/10 dark:via-purple-500/10 dark:to-pink-500/10 border border-slate-200 dark:border-white/10 p-6 md:p-8">
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_2s_infinite]" />
         <div className="relative z-10">
@@ -449,7 +619,7 @@ const Habits = () => {
                 className="flex items-center gap-2 px-4 py-3 bg-gradient-to-br from-white to-slate-50 dark:from-black dark:to-slate-900/50 border border-slate-200 dark:border-white/20 text-slate-600 dark:text-slate-400 font-bold rounded-2xl text-sm hover:scale-105 transition-all hover:shadow-lg hover:border-red-300 dark:hover:border-red-500/30 group"
               >
                 <RotateCcw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
-                Reset
+                Reset Month
               </button>
               <button 
                 onClick={() => setCurrentDate(new Date())}
@@ -487,7 +657,7 @@ const Habits = () => {
         </div>
       </div>
 
-      {/* STATS CARDS GRID */}
+      {/* STATS CARDS */}
       <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 ${activeView !== 'stats' ? 'hidden' : ''}`}>
         <div className={`${containerClass} p-6 relative overflow-hidden group`}>
           <div className="absolute -right-4 -top-4 w-20 h-20 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-full blur-xl" />
@@ -496,10 +666,10 @@ const Habits = () => {
               <Flame size={20} className="text-orange-500" />
             </div>
             <span className="text-xs font-bold px-2 py-1 bg-gradient-to-r from-orange-500/10 to-orange-500/5 text-orange-600 dark:text-orange-400 rounded-full">
-              Live
+              {isCurrentMonth ? 'Current' : 'Historical'}
             </span>
           </div>
-          <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-1">Current Streak</p>
+          <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-1">Streak</p>
           <div className="flex items-end gap-2">
             <p className="text-3xl md:text-4xl font-black bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
               {currentStreak}
@@ -529,7 +699,7 @@ const Habits = () => {
           </div>
           {topHabit && (
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-              {topHabit.checks.length} checks this month
+              {topHabit.monthlyData?.[monthKey]?.length || 0} checks this month
             </p>
           )}
         </div>
@@ -578,9 +748,9 @@ const Habits = () => {
         </div>
       </div>
 
-      {/* MAIN CONTENT AREA */}
+      {/* MATRIX VIEW */}
       <div className={`space-y-6 ${activeView !== 'matrix' ? 'hidden' : ''}`}>
-        {/* MONTH NAVIGATION CARD */}
+        {/* MONTH NAVIGATION */}
         <div className={`${containerClass} p-6`}>
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-4">
@@ -676,19 +846,21 @@ const Habits = () => {
           </div>
         </div>
 
-        {/* HABIT MATRIX WITH DRAG AND DROP */}
+        {/* HABIT MATRIX TABLE */}
         <div className={`${containerClass} p-0 overflow-hidden`}>
           <div className="p-6 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-black text-slate-900 dark:text-white">Habit Matrix</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Track your daily consistency • Drag to reorder</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Track your daily consistency • Drag to reorder • Hover over habit name to edit</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold px-3 py-1 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5 text-emerald-600 dark:text-emerald-400 rounded-full">
                 {habits.length} habits
               </span>
               <span className="text-xs font-bold px-3 py-1 bg-gradient-to-r from-indigo-500/10 to-indigo-500/5 text-indigo-600 dark:text-indigo-400 rounded-full">
-                {habits.reduce((acc, h) => acc + h.checks.length, 0)} checks
+                {habits.reduce((acc, h) => {
+                  return acc + (h.monthlyData?.[monthKey]?.length || 0);
+                }, 0)} checks
               </span>
             </div>
           </div>
@@ -705,7 +877,7 @@ const Habits = () => {
             <table className="w-full border-collapse min-w-[800px]">
               <thead className="sticky top-0 z-30">
                 <tr className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 border-b border-slate-200 dark:border-white/10">
-                  <th className="text-left py-5 pl-6 min-w-[200px] sticky left-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 z-20 text-xs font-black text-slate-500 uppercase border-r border-slate-200 dark:border-white/10">
+                  <th className="text-left py-5 pl-4 min-w-[200px] sticky left-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 z-20 text-xs font-black text-slate-500 uppercase border-r border-slate-200 dark:border-white/10">
                     <div className="flex items-center gap-2">
                       <GripVertical size={14} className="opacity-50" />
                       <CheckSquare size={14} />
@@ -729,22 +901,22 @@ const Habits = () => {
                       </div>
                     </th>
                   ))}
-                  <th className="text-right py-5 pr-6 sticky right-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 z-20 text-xs font-black text-slate-500 uppercase border-l border-slate-200 dark:border-white/10">
+                  <th className="text-right py-5 pr-4 sticky right-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-white/5 dark:to-white/10 z-20 text-xs font-black text-slate-500 uppercase border-l border-slate-200 dark:border-white/10">
                     Progress
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={habits.map(h => h.id)}
+                  strategy={verticalListSortingStrategy}
                 >
-                  <SortableContext
-                    items={habits.map(h => h.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
+                  <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                     {habits.map((habit, index) => (
                       <SortableHabitRow
                         key={habit.id}
@@ -757,20 +929,20 @@ const Habits = () => {
                         today={today}
                         onToggle={toggleCheck}
                         onRemove={removeHabit}
+                        onEdit={editHabit}
                       />
                     ))}
-                  </SortableContext>
-                </DndContext>
-              </tbody>
+                  </tbody>
+                </SortableContext>
+              </DndContext>
             </table>
           </div>
           
-          {/* Drag instruction */}
           {habits.length > 1 && (
             <div className="p-3 text-center border-t border-slate-200 dark:border-white/10 bg-gradient-to-b from-transparent to-slate-50/50 dark:to-white/[0.02]">
               <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center justify-center gap-2">
                 <GripVertical size={12} />
-                Drag the <GripVertical size={12} /> handle to reorder habits
+                Drag the <GripVertical size={12} /> handle to reorder habits • Hover over habit name to edit
               </p>
             </div>
           )}
@@ -786,7 +958,9 @@ const Habits = () => {
             <div className="flex justify-between items-center mb-8">
               <div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white mb-1">Consistency Trend</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Daily completion percentage</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })} daily completion
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button 
@@ -802,47 +976,45 @@ const Habits = () => {
             </div>
             
             <div className="flex-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={lineData}>
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.1}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis 
-                    dataKey="day" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                    interval={Math.floor(daysInMonthCount / 10)}
-                  />
-                  <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                    domain={[0, 100]}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="value" 
-                    stroke="#6366f1" 
-                    strokeWidth={isBoldCharts ? 3 : 2}
-                    fill="url(#colorValue)"
-                    dot={{ r: isBoldCharts ? 4 : 2, fill: '#6366f1' }}
-                    activeDot={{ r: 6, fill: '#ffffff', stroke: '#6366f1', strokeWidth: 2 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="value" 
-                    stroke="#6366f1" 
-                    strokeWidth={isBoldCharts ? 3 : 1}
-                    strokeDasharray="5 5"
-                    dot={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {habits.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={lineData}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.1}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis 
+                      dataKey="day" 
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      interval={Math.floor(daysInMonthCount / 10)}
+                    />
+                    <YAxis 
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      domain={[0, 100]}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke="#6366f1" 
+                      strokeWidth={isBoldCharts ? 3 : 2}
+                      fill="url(#colorValue)"
+                      dot={{ r: isBoldCharts ? 4 : 2, fill: '#6366f1' }}
+                      activeDot={{ r: 6, fill: '#ffffff', stroke: '#6366f1', strokeWidth: 2 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400">
+                  No data to display
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -854,7 +1026,9 @@ const Habits = () => {
             <div className="flex justify-between items-center mb-8">
               <div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white mb-1">Habit Distribution</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Days checked per habit</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })} check-ins
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button 
@@ -870,30 +1044,36 @@ const Habits = () => {
             </div>
             
             <div className="flex-1 relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie 
-                    data={pieData} 
-                    innerRadius={isBoldCharts ? 50 : 60} 
-                    outerRadius={isBoldCharts ? 90 : 80} 
-                    paddingAngle={2}
-                    dataKey="value"
-                    stroke="none"
-                    strokeWidth={2}
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell 
-                        key={index} 
-                        fill={entry.color}
-                        stroke="#0f172a"
-                        strokeWidth={1}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomPieTooltip />} />
-                  <Legend content={<CustomLegend />} />
-                </PieChart>
-              </ResponsiveContainer>
+              {habits.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie 
+                      data={pieData} 
+                      innerRadius={isBoldCharts ? 50 : 60} 
+                      outerRadius={isBoldCharts ? 90 : 80} 
+                      paddingAngle={2}
+                      dataKey="value"
+                      stroke="none"
+                      strokeWidth={2}
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell 
+                          key={index} 
+                          fill={entry.color}
+                          stroke="#0f172a"
+                          strokeWidth={1}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomPieTooltip />} />
+                    <Legend content={<CustomLegend />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400">
+                  No data to display
+                </div>
+              )}
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <div className="w-24 h-24 rounded-full bg-gradient-to-br from-white/10 to-transparent backdrop-blur-sm border border-white/10 flex flex-col items-center justify-center">
                   <span className="text-3xl font-black text-slate-900 dark:text-white">{habits.length}</span>
@@ -904,14 +1084,16 @@ const Habits = () => {
           </div>
         </div>
 
-        {/* BAR CHART - Top Habits */}
+        {/* BAR CHART */}
         <div className={`${containerClass} p-6 h-[350px] lg:col-span-2 relative overflow-hidden group`}>
           <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-yellow-500/5" />
           <div className="relative z-10 h-full flex flex-col">
             <div className="flex justify-between items-center mb-8">
               <div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white mb-1">Top Performing Habits</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Most checked habits this month</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })} most checked
+                </p>
               </div>
               <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-orange-500 to-yellow-500">
                 <BarChart3 size={20} className="text-white" />
@@ -919,47 +1101,53 @@ const Habits = () => {
             </div>
             
             <div className="flex-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barData}>
-                  <defs>
-                    {barData.map((entry, index) => (
-                      <linearGradient key={index} id={`gradient${index}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={entry.color} stopOpacity={0.8}/>
-                        <stop offset="100%" stopColor={entry.color} stopOpacity={0.2}/>
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                  />
-                  <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#0f172a', 
-                      border: '1px solid #334155', 
-                      borderRadius: '12px',
-                      color: '#fff'
-                    }}
-                    formatter={(value) => [value, 'Days']}
-                  />
-                  <Bar 
-                    dataKey="checks" 
-                    radius={[8, 8, 0, 0]}
-                    animationDuration={1500}
-                  >
-                    {barData.map((entry, index) => (
-                      <Cell key={index} fill={`url(#gradient${index})`} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              {habits.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barData}>
+                    <defs>
+                      {barData.map((entry, index) => (
+                        <linearGradient key={index} id={`gradient${index}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={entry.color} stopOpacity={0.8}/>
+                          <stop offset="100%" stopColor={entry.color} stopOpacity={0.2}/>
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    />
+                    <YAxis 
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: '#0f172a', 
+                        border: '1px solid #334155', 
+                        borderRadius: '12px',
+                        color: '#fff'
+                      }}
+                      formatter={(value) => [value, 'Days']}
+                    />
+                    <Bar 
+                      dataKey="checks" 
+                      radius={[8, 8, 0, 0]}
+                      animationDuration={1500}
+                    >
+                      {barData.map((entry, index) => (
+                        <Cell key={index} fill={`url(#gradient${index})`} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400">
+                  No data to display
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -987,12 +1175,12 @@ const Habits = () => {
       )}
 
       {/* ACHIEVEMENT BADGES */}
-      {habits.length > 0 && currentStreak > 0 && (
+      {habits.length > 0 && currentStreak > 0 && isCurrentMonth && (
         <div className={`${containerClass} p-6`}>
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-lg font-black text-slate-900 dark:text-white">Achievements</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Your habit milestones</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Your habit milestones this month</p>
             </div>
             <Award size={24} className="text-yellow-500" />
           </div>
@@ -1028,13 +1216,15 @@ const Habits = () => {
               </div>
             )}
             
-            {topHabit && topHabit.checks.length >= 20 && (
+            {topHabit && topHabit.monthlyData?.[monthKey]?.length >= 20 && (
               <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20">
                 <div className="flex items-center gap-3 mb-2">
                   <Crown size={20} className="text-purple-500" />
                   <span className="text-sm font-bold text-slate-900 dark:text-white">Master Habit</span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{topHabit.checks.length}+ days</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {topHabit.monthlyData?.[monthKey]?.length}+ days
+                </p>
               </div>
             )}
           </div>
