@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   CheckCircle2, Circle, ArrowRight, Zap, Clock, TrendingUp, 
   Bell, Calendar, Target, Flame, Activity, Award, Star, 
   ChevronRight, Battery, Trophy, Target as TargetIcon,
   BookOpen, Leaf, Coffee, ListTodo, CalendarDays, Goal,
-  Users, Layout, Settings, Flower2, Moon, Sparkles
+  Users, Layout, Settings, Flower2, Moon, Sparkles, Plus,
+  RefreshCw, AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
 import { 
   collection, query, onSnapshot, orderBy, where,
-  Timestamp, doc, updateDoc, arrayUnion 
+  Timestamp, doc, updateDoc, addDoc, deleteDoc,
+  getDocs, limit
 } from 'firebase/firestore';
 
 const Dashboard = () => {
@@ -27,7 +29,9 @@ const Dashboard = () => {
     longestStreak: 0,
     dailyGoalProgress: 0,
     weeklyTasks: 0,
-    overdueTasks: 0
+    overdueTasks: 0,
+    totalGoals: 0,
+    goalsCompleted: 0
   });
 
   const [recentTasks, setRecentTasks] = useState([]);
@@ -39,9 +43,11 @@ const Dashboard = () => {
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [goals, setGoals] = useState([]);
   const [routines, setRoutines] = useState([]);
-  const [gardenProgress, setGardenProgress] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tab configuration with colors and icons
+  // Tab configuration
   const tabs = [
     {
       id: 'tasks',
@@ -144,6 +150,49 @@ const Dashboard = () => {
     }
   ];
 
+  // Function to calculate habit streak
+  const calculateStreak = useCallback((checks) => {
+    if (!checks || checks.length === 0) return 0;
+    
+    let currentStreak = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Sort checks in descending order
+    const sortedChecks = [...checks].sort((a, b) => {
+      const dateA = new Date(a.seconds ? a.seconds * 1000 : a);
+      const dateB = new Date(b.seconds ? b.seconds * 1000 : b);
+      return dateB - dateA;
+    });
+    
+    let checkDate = new Date(sortedChecks[0].seconds ? sortedChecks[0].seconds * 1000 : sortedChecks[0]);
+    checkDate.setHours(0, 0, 0, 0);
+    
+    // Check if latest check is today or yesterday
+    const dayDiff = Math.floor((today - checkDate) / (1000 * 60 * 60 * 24));
+    if (dayDiff > 1) return 0;
+    
+    currentStreak = 1;
+    
+    // Count consecutive days
+    for (let i = 1; i < sortedChecks.length; i++) {
+      const prevDate = new Date(sortedChecks[i-1].seconds ? sortedChecks[i-1].seconds * 1000 : sortedChecks[i-1]);
+      const currDate = new Date(sortedChecks[i].seconds ? sortedChecks[i].seconds * 1000 : sortedChecks[i]);
+      prevDate.setHours(0, 0, 0, 0);
+      currDate.setHours(0, 0, 0, 0);
+      
+      const diff = Math.floor((prevDate - currDate) / (1000 * 60 * 60 * 24));
+      if (diff === 1) {
+        currentStreak++;
+      } else {
+        break;
+      }
+    }
+    
+    return currentStreak;
+  }, []);
+
+  // Fetch tasks with real-time updates
   useEffect(() => {
     if (!user) return;
 
@@ -154,9 +203,14 @@ const Dashboard = () => {
     );
     
     const unsubscribeTasks = onSnapshot(tasksQuery, (snapshot) => {
-      const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const now = new Date();
+      const tasks = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        dueDate: doc.data().dueDate?.seconds ? new Date(doc.data().dueDate.seconds * 1000) : null,
+        createdAt: doc.data().createdAt?.seconds ? new Date(doc.data().createdAt.seconds * 1000) : new Date()
+      }));
       
+      const now = new Date();
       const completed = tasks.filter(t => t.completed).length;
       const total = tasks.length;
       const productivityScore = total === 0 ? 0 : Math.round((completed / total) * 100);
@@ -164,16 +218,16 @@ const Dashboard = () => {
       const overdue = tasks.filter(task => 
         task.dueDate && 
         !task.completed && 
-        new Date(task.dueDate.seconds * 1000) < now
+        new Date(task.dueDate) < now
       ).length;
       
       const upcoming = tasks
         .filter(task => 
           task.dueDate && 
           !task.completed &&
-          new Date(task.dueDate.seconds * 1000) > now
+          new Date(task.dueDate) > now
         )
-        .sort((a, b) => a.dueDate - b.dueDate)
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
         .slice(0, 3);
 
       setUpcomingDeadlines(upcoming);
@@ -184,68 +238,68 @@ const Dashboard = () => {
         totalTasks: total,
         productivity: productivityScore,
         overdueTasks: overdue,
-        dailyGoalProgress: Math.min(Math.round((completed / dailyGoal) * 100), 100)
+        dailyGoalProgress: dailyGoal > 0 ? Math.min(Math.round((completed / dailyGoal) * 100), 100) : 0
       }));
 
       setRecentTasks(tasks.slice(0, 5));
+      setLastUpdated(new Date());
+    }, (error) => {
+      console.error('Error fetching tasks:', error);
     });
 
-    // Habits subscription
+    // Habits subscription with streak calculation
     const habitsQuery = query(collection(db, 'users', user.uid, 'habits'));
     
     const unsubscribeHabits = onSnapshot(habitsQuery, (snapshot) => {
-      const habits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const totalChecks = habits.reduce((acc, curr) => acc + (curr.checks?.length || 0), 0);
+      const habits = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        monthlyData: doc.data().monthlyData || {}
+      }));
+      
+      // Get current month's checks
+      const currentDate = new Date();
+      const monthKey = `${currentDate.getFullYear()}-${currentDate.getMonth() + 1}`;
+      
+      let totalChecks = 0;
+      let totalCurrentStreak = 0;
+      let maxStreak = 0;
       
       const streaks = habits.map(habit => {
-        const checks = habit.checks || [];
-        let currentStreak = 0;
-        let longestStreak = 0;
-        let tempStreak = 0;
+        const monthlyChecks = habit.monthlyData?.[monthKey] || [];
+        totalChecks += monthlyChecks.length;
         
-        const sortedChecks = checks.sort((a, b) => a.seconds - b.seconds);
+        // Calculate streak based on monthly checks (which are day numbers)
+        let streak = 0;
+        const today = currentDate.getDate();
         
-        sortedChecks.forEach((check, index) => {
-          const checkDate = new Date(check.seconds * 1000);
-          const prevDate = index > 0 ? new Date(sortedChecks[index - 1].seconds * 1000) : null;
-          
-          if (prevDate && 
-              Math.abs((checkDate - prevDate) / (1000 * 60 * 60 * 24)) <= 1) {
-            tempStreak++;
+        for (let i = today; i >= 1; i--) {
+          if (monthlyChecks.includes(i)) {
+            streak++;
           } else {
-            tempStreak = 1;
+            break;
           }
-          
-          longestStreak = Math.max(longestStreak, tempStreak);
-          
-          const today = new Date();
-          const yesterday = new Date(today);
-          yesterday.setDate(yesterday.getDate() - 1);
-          
-          if (checkDate.toDateString() === today.toDateString() ||
-              checkDate.toDateString() === yesterday.toDateString()) {
-            currentStreak = tempStreak;
-          }
-        });
+        }
         
-        return { ...habit, currentStreak, longestStreak };
+        totalCurrentStreak += streak;
+        if (streak > maxStreak) maxStreak = streak;
+        
+        return { ...habit, currentStreak: streak, longestStreak: streak };
       });
 
       setHabitStreaks(streaks);
       
-      const totalCurrentStreak = Math.round(
-        streaks.reduce((acc, habit) => acc + habit.currentStreak, 0) / (streaks.length || 1)
-      );
-      
-      const maxStreak = Math.max(...streaks.map(h => h.longestStreak), 0);
+      const avgStreak = habits.length > 0 ? Math.round(totalCurrentStreak / habits.length) : 0;
 
       setStats(prev => ({
         ...prev,
         activeHabits: habits.length,
         habitCompletions: totalChecks,
-        currentStreak: totalCurrentStreak,
+        currentStreak: avgStreak,
         longestStreak: maxStreak
       }));
+    }, (error) => {
+      console.error('Error fetching habits:', error);
     });
 
     // Calendar events subscription
@@ -256,16 +310,36 @@ const Dashboard = () => {
     );
     
     const unsubscribeCalendar = onSnapshot(calendarQuery, (snapshot) => {
-      const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const events = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        startTime: doc.data().startTime?.seconds ? new Date(doc.data().startTime.seconds * 1000) : null,
+        endTime: doc.data().endTime?.seconds ? new Date(doc.data().endTime.seconds * 1000) : null
+      }));
       setCalendarEvents(events.slice(0, 3));
+    }, (error) => {
+      console.error('Error fetching calendar events:', error);
     });
 
     // Goals subscription
     const goalsQuery = query(collection(db, 'users', user.uid, 'goals'));
     
     const unsubscribeGoals = onSnapshot(goalsQuery, (snapshot) => {
-      const goalsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const goalsData = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        progress: doc.data().progress || 0
+      }));
       setGoals(goalsData.slice(0, 3));
+      
+      const completed = goalsData.filter(g => g.progress >= 100).length;
+      setStats(prev => ({
+        ...prev,
+        totalGoals: goalsData.length,
+        goalsCompleted: completed
+      }));
+    }, (error) => {
+      console.error('Error fetching goals:', error);
     });
 
     // Routines subscription
@@ -274,6 +348,8 @@ const Dashboard = () => {
     const unsubscribeRoutines = onSnapshot(routinesQuery, (snapshot) => {
       const routinesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRoutines(routinesData.slice(0, 3));
+    }, (error) => {
+      console.error('Error fetching routines:', error);
     });
 
     // Notifications subscription
@@ -284,19 +360,32 @@ const Dashboard = () => {
     );
     
     const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
-      const notifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const notifs = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.seconds ? new Date(doc.data().timestamp.seconds * 1000) : new Date()
+      }));
       setNotifications(notifs.slice(0, 5));
+    }, (error) => {
+      console.error('Error fetching notifications:', error);
     });
 
     // Activity subscription
     const activityQuery = query(
       collection(db, 'users', user.uid, 'activity'),
-      orderBy('timestamp', 'desc')
+      orderBy('timestamp', 'desc'),
+      limit(8)
     );
     
     const unsubscribeActivity = onSnapshot(activityQuery, (snapshot) => {
-      const activities = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setLiveActivity(activities.slice(0, 8));
+      const activities = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.seconds ? new Date(doc.data().timestamp.seconds * 1000) : new Date()
+      }));
+      setLiveActivity(activities);
+    }, (error) => {
+      console.error('Error fetching activity:', error);
     });
 
     return () => {
@@ -328,8 +417,7 @@ const Dashboard = () => {
       });
       
       // Add to activity log
-      const activityRef = collection(db, 'users', user.uid, 'activity');
-      await updateDoc(activityRef, {
+      await addDoc(collection(db, 'users', user.uid, 'activity'), {
         message: 'Completed a task',
         type: 'task_complete',
         timestamp: Timestamp.now(),
@@ -340,26 +428,58 @@ const Dashboard = () => {
     }
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setLastUpdated(new Date());
+    setTimeout(() => setIsRefreshing(false), 1000);
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   const cardClass = "bg-white dark:bg-black border border-slate-200 dark:border-white/10 rounded-[24px] shadow-sm transition-all duration-300";
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
       
-      {/* Header Section with Notifications */}
+      {/* Header Section */}
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-start flex-wrap gap-4">
           <div>
-            <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              Dashboard <span className="animate-pulse inline-block ml-2">✨</span>
-            </h1>
-            <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">
-              Welcome back, <span className="text-slate-900 dark:text-white font-bold">{user?.displayName?.split(' ')[0] || 'User'}</span>. Here's your productivity hub.
-            </p>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg">
+                <Sparkles size={24} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                  {getGreeting()}! <span className="animate-pulse inline-block">✨</span>
+                </h1>
+                <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">
+                  Welcome back, <span className="text-slate-900 dark:text-white font-bold">{user?.displayName?.split(' ')[0] || 'User'}</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+              <span>Last updated: {lastUpdated.toLocaleTimeString()}</span>
+              <button 
+                onClick={handleRefresh}
+                className={`p-1 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-all ${isRefreshing ? 'animate-spin' : ''}`}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
           </div>
           
           {/* Notifications Bell */}
           <div className="relative">
-            <button className="p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-colors group">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-colors group"
+            >
               <Bell size={20} className="text-slate-600 dark:text-slate-300 group-hover:text-indigo-500" />
               {notifications.length > 0 && (
                 <>
@@ -375,14 +495,14 @@ const Dashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
         <StatCard 
           title="Tasks Completed" 
           value={`${stats.completedTasks}/${stats.totalTasks}`} 
           icon={<Target size={20} />}
           color="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
           border="border-emerald-500/20"
-          trend={stats.totalTasks > 0 ? `↑ ${stats.completedTasks} today` : "No tasks yet"}
+          trend={stats.totalTasks > 0 ? `↑ ${stats.completedTasks} done` : "No tasks yet"}
           progress={stats.totalTasks > 0 ? Math.round((stats.completedTasks / stats.totalTasks) * 100) : 0}
         />
         <StatCard 
@@ -421,7 +541,50 @@ const Dashboard = () => {
           trend={`${stats.habitCompletions} check-ins`}
           progress={stats.activeHabits > 0 ? Math.min((stats.habitCompletions / (stats.activeHabits * 7)) * 100, 100) : 0}
         />
+        <StatCard 
+          title="Goals" 
+          value={`${stats.goalsCompleted}/${stats.totalGoals}`} 
+          icon={<Award size={20} />}
+          color="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" 
+          border="border-yellow-500/20"
+          trend={`${stats.totalGoals - stats.goalsCompleted} remaining`}
+          progress={stats.totalGoals > 0 ? Math.round((stats.goalsCompleted / stats.totalGoals) * 100) : 0}
+        />
       </div>
+
+      {/* Live Activity Feed */}
+      {liveActivity.length > 0 && (
+        <div className={`${cardClass} p-6`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
+                <Zap size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white">Live Activity</h3>
+                <p className="text-xs text-slate-500">Real-time updates from your workflow</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+              <span className="text-xs text-slate-500">Live</span>
+            </div>
+          </div>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {liveActivity.map((activity) => (
+              <div key={activity.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                <div className="text-xl">{activity.icon || '📝'}</div>
+                <div className="flex-1">
+                  <p className="text-sm text-slate-600 dark:text-slate-300">{activity.message}</p>
+                  <p className="text-xs text-slate-400">
+                    {activity.timestamp?.toLocaleTimeString() || new Date().toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick Access Tabs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -435,29 +598,59 @@ const Dashboard = () => {
               habits: habitStreaks,
               events: calendarEvents,
               goals: goals,
-              routines: routines
+              routines: routines,
+              onCompleteTask: handleCompleteTask
             }}
           />
         ))}
       </div>
 
+      {/* Overdue Tasks Alert */}
+      {stats.overdueTasks > 0 && (
+        <div className="fixed bottom-6 right-6 w-80 bg-red-500/10 backdrop-blur-md border border-red-500/20 rounded-2xl shadow-2xl z-50 animate-slide-up">
+          <div className="p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <AlertCircle size={20} className="text-red-500" />
+              <h4 className="font-bold text-red-600 dark:text-red-400">Overdue Tasks</h4>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+              You have {stats.overdueTasks} overdue task{stats.overdueTasks > 1 ? 's' : ''}
+            </p>
+            <button 
+              onClick={() => navigate('/tasks')}
+              className="w-full py-2 bg-red-500 text-white rounded-xl text-sm font-bold hover:bg-red-600 transition-colors"
+            >
+              View Tasks
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Notifications Panel */}
-      {notifications.length > 0 && (
-        <div className="fixed bottom-6 right-6 w-80 bg-white dark:bg-black border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 animate-slide-up">
+      {showNotifications && notifications.length > 0 && (
+        <div className="fixed bottom-6 right-6 w-96 bg-white dark:bg-black border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 animate-slide-up">
           <div className="p-4 border-b border-slate-100 dark:border-white/5 flex justify-between items-center">
             <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Bell size={16} />
               Notifications
             </h4>
-            <span className="text-xs font-bold px-2 py-1 bg-red-500/10 text-red-500 rounded-full">
-              {notifications.length} new
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-2 py-1 bg-red-500/10 text-red-500 rounded-full">
+                {notifications.length} new
+              </span>
+              <button 
+                onClick={() => setShowNotifications(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-96 overflow-y-auto">
             {notifications.map((notification) => (
               <div 
                 key={notification.id}
-                className="p-4 border-b border-slate-100 dark:border-white/5 last:border-0 hover:bg-slate-50 dark:hover:bg-white/5"
+                className="p-4 border-b border-slate-100 dark:border-white/5 last:border-0 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
               >
                 <div className="flex justify-between items-start mb-2">
                   <h5 className="font-semibold text-slate-900 dark:text-white">{notification.title}</h5>
@@ -470,7 +663,7 @@ const Dashboard = () => {
                 </div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">{notification.message}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  {new Date(notification.timestamp?.seconds * 1000).toLocaleTimeString()}
+                  {notification.timestamp?.toLocaleTimeString() || new Date().toLocaleTimeString()}
                 </p>
               </div>
             ))}
@@ -488,17 +681,27 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
       case 'tasks':
         return (
           <div className="space-y-2">
-            {data.tasks.slice(0, 2).map(task => (
-              <div key={task.id} className="flex items-center gap-2 text-xs">
-                {task.completed ? 
-                  <CheckCircle2 size={12} className="text-emerald-500" /> : 
-                  <Circle size={12} className="text-slate-300" />
-                }
-                <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{task.text}</span>
-                {task.priority && (
-                  <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${
+            {data.tasks.slice(0, 3).map(task => (
+              <div key={task.id} className="flex items-center gap-2 text-xs group/task">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (data.onCompleteTask) data.onCompleteTask(task.id);
+                  }}
+                  className="hover:scale-110 transition-transform"
+                >
+                  {task.completed ? 
+                    <CheckCircle2 size={14} className="text-emerald-500" /> : 
+                    <Circle size={14} className="text-slate-300 hover:text-emerald-500" />
+                  }
+                </button>
+                <span className={`truncate flex-1 ${task.completed ? 'line-through text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                  {task.text}
+                </span>
+                {task.priority && !task.completed && (
+                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
                     task.priority === 'High' ? 'bg-red-500/10 text-red-500' :
-                    task.priority === 'Med' ? 'bg-orange-500/10 text-orange-500' :
+                    task.priority === 'Medium' ? 'bg-orange-500/10 text-orange-500' :
                     'bg-emerald-500/10 text-emerald-500'
                   }`}>
                     {task.priority}
@@ -507,7 +710,29 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
               </div>
             ))}
             {data.tasks.length === 0 && (
-              <p className="text-xs text-slate-400">No tasks yet</p>
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-400">No tasks yet</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = '/tasks';
+                  }}
+                  className="mt-2 text-xs text-indigo-500 hover:text-indigo-600 font-bold"
+                >
+                  + Create Task
+                </button>
+              </div>
+            )}
+            {data.tasks.length > 0 && data.tasks.length < 3 && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.location.href = '/tasks';
+                }}
+                className="text-xs text-indigo-500 hover:text-indigo-600 font-bold mt-1"
+              >
+                + Add more
+              </button>
             )}
           </div>
         );
@@ -515,17 +740,28 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
       case 'habits':
         return (
           <div className="space-y-2">
-            {data.habits.slice(0, 2).map(habit => (
+            {data.habits.slice(0, 3).map(habit => (
               <div key={habit.id} className="flex items-center justify-between text-xs">
-                <span className="text-slate-600 dark:text-slate-400">{habit.name}</span>
-                <div className="flex items-center gap-1">
+                <span className="text-slate-600 dark:text-slate-400 truncate flex-1">{habit.name}</span>
+                <div className="flex items-center gap-1 ml-2">
                   <Flame size={10} className="text-orange-500" />
-                  <span className="font-bold">{habit.currentStreak || 0}</span>
+                  <span className="font-bold text-orange-600 dark:text-orange-400">{habit.currentStreak || 0}</span>
                 </div>
               </div>
             ))}
             {data.habits.length === 0 && (
-              <p className="text-xs text-slate-400">No active habits</p>
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-400">No active habits</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = '/habits';
+                  }}
+                  className="mt-2 text-xs text-emerald-500 hover:text-emerald-600 font-bold"
+                >
+                  + Create Habit
+                </button>
+              </div>
             )}
           </div>
         );
@@ -533,40 +769,62 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
       case 'calendar':
         return (
           <div className="space-y-2">
-            {data.events.slice(0, 2).map(event => (
+            {data.events.slice(0, 3).map(event => (
               <div key={event.id} className="flex items-center gap-2 text-xs">
                 <div className="w-2 h-2 rounded-full bg-purple-500"></div>
                 <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{event.title}</span>
-                <span className="text-slate-400">
-                  {new Date(event.startTime?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <span className="text-slate-400 text-[10px]">
+                  {event.startTime?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             ))}
             {data.events.length === 0 && (
-              <p className="text-xs text-slate-400">No upcoming events</p>
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-400">No upcoming events</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = '/calendar';
+                  }}
+                  className="mt-2 text-xs text-purple-500 hover:text-purple-600 font-bold"
+                >
+                  + Add Event
+                </button>
+              </div>
             )}
           </div>
         );
       
       case 'goals':
         return (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {data.goals.slice(0, 2).map(goal => (
               <div key={goal.id} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-600 dark:text-slate-400">{goal.title}</span>
-                  <span className="text-slate-400">{goal.progress || 0}%</span>
+                  <span className="text-slate-600 dark:text-slate-400 truncate flex-1">{goal.title}</span>
+                  <span className="text-slate-400 ml-2">{goal.progress || 0}%</span>
                 </div>
-                <div className="w-full h-1 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                <div className="w-full h-1.5 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 rounded-full"
+                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 rounded-full transition-all duration-500"
                     style={{ width: `${goal.progress || 0}%` }}
                   ></div>
                 </div>
               </div>
             ))}
             {data.goals.length === 0 && (
-              <p className="text-xs text-slate-400">No goals set</p>
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-400">No goals set</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = '/goals';
+                  }}
+                  className="mt-2 text-xs text-orange-500 hover:text-orange-600 font-bold"
+                >
+                  + Set Goal
+                </button>
+              </div>
             )}
           </div>
         );
@@ -574,77 +832,94 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
       case 'routines':
         return (
           <div className="space-y-2">
-            {data.routines.slice(0, 2).map(routine => (
+            {data.routines.slice(0, 3).map(routine => (
               <div key={routine.id} className="flex items-center gap-2 text-xs">
                 <Clock size={10} className="text-indigo-500" />
                 <span className="truncate flex-1 text-slate-600 dark:text-slate-400">{routine.name}</span>
-                <span className="text-slate-400">{routine.time || 'Anytime'}</span>
+                <span className="text-slate-400 text-[10px]">{routine.time || 'Anytime'}</span>
               </div>
             ))}
             {data.routines.length === 0 && (
-              <p className="text-xs text-slate-400">No routines created</p>
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-400">No routines created</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = '/routines';
+                  }}
+                  className="mt-2 text-xs text-indigo-500 hover:text-indigo-600 font-bold"
+                >
+                  + Create Routine
+                </button>
+              </div>
             )}
           </div>
         );
       
       case 'streakgarden':
         return (
-          <div className="flex items-center justify-around py-2">
-            {[1,2,3].map((i) => (
-              <div key={i} className="flex flex-col items-center">
-                <Flower2 size={20} className="text-green-500" />
-                <div className="w-1 h-6 bg-gradient-to-t from-green-500 to-emerald-300 rounded-full mt-1"></div>
-                <span className="text-[8px] text-slate-400 mt-1">Day {i}</span>
-              </div>
-            ))}
+          <div className="space-y-2">
+            <div className="flex items-center justify-around py-2">
+              {[1,2,3,4].map((i) => (
+                <div key={i} className="flex flex-col items-center">
+                  <Flower2 size={24} className="text-green-500" />
+                  <div className="w-1 h-8 bg-gradient-to-t from-green-500 to-emerald-300 rounded-full mt-1"></div>
+                  <span className="text-[8px] text-slate-400 mt-1">Day {i}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-xs text-slate-500">Keep your streak alive!</p>
           </div>
         );
       
       case 'relaxzone':
         return (
-          <div className="flex items-center justify-center gap-4 py-2">
-            <Moon size={20} className="text-violet-500 animate-pulse" />
-            <Sparkles size={20} className="text-purple-500" />
-            <Coffee size={20} className="text-amber-500" />
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-6 py-3">
+              <Moon size={24} className="text-violet-500 animate-pulse" />
+              <Sparkles size={24} className="text-purple-500" />
+              <Coffee size={24} className="text-amber-500" />
+              <Leaf size={24} className="text-emerald-500" />
+            </div>
+            <p className="text-center text-xs text-slate-500">Take a moment to relax</p>
           </div>
         );
       
       case 'reports':
         return (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-600 dark:text-slate-400">This week</span>
+              <span className="text-slate-600 dark:text-slate-400">Weekly Progress</span>
               <span className="font-bold text-green-500">+12%</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-600 dark:text-slate-400">Last week</span>
-              <span className="font-bold text-slate-600">85%</span>
-            </div>
-            <div className="flex gap-1 pt-1">
+            <div className="flex gap-1 pt-1 h-16">
               {[40, 60, 45, 70, 85, 65, 90].map((height, i) => (
-                <div key={i} className="flex-1 h-12 bg-slate-100 dark:bg-white/5 rounded-sm relative">
+                <div key={i} className="flex-1 bg-slate-100 dark:bg-white/5 rounded-sm relative">
                   <div 
-                    className="absolute bottom-0 w-full bg-gradient-to-t from-rose-500 to-pink-500 rounded-sm"
+                    className="absolute bottom-0 w-full bg-gradient-to-t from-rose-500 to-pink-500 rounded-sm transition-all duration-300"
                     style={{ height: `${height}%` }}
                   ></div>
                 </div>
               ))}
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400">
+              <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
             </div>
           </div>
         );
       
       case 'settings':
         return (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs py-1">
               <span className="text-slate-600 dark:text-slate-400">Theme</span>
-              <span className="text-slate-400">Dark/Light</span>
+              <span className="text-slate-400">Auto</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-xs py-1">
               <span className="text-slate-600 dark:text-slate-400">Notifications</span>
-              <span className="text-slate-400">On</span>
+              <span className="text-slate-400">Enabled</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-xs py-1">
               <span className="text-slate-600 dark:text-slate-400">Language</span>
               <span className="text-slate-400">English</span>
             </div>
@@ -660,7 +935,7 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
     <div 
       onClick={onClick}
       className={`
-        relative overflow-hidden p-6 rounded-2xl 
+        relative overflow-hidden p-5 rounded-2xl 
         bg-white dark:bg-black 
         border border-slate-200 dark:border-white/10 
         hover:border-slate-300 dark:hover:border-white/20
@@ -706,29 +981,29 @@ const QuickAccessCard = ({ tab, onClick, data }) => {
 // Stat Card Component
 const StatCard = ({ title, value, icon, color, border, trend, progress }) => (
   <div className={`
-    relative overflow-hidden p-5 rounded-2xl 
+    relative overflow-hidden p-4 rounded-2xl 
     bg-white dark:bg-black 
     border border-slate-200 dark:border-white/10 
     hover:border-slate-300 dark:hover:border-white/20
     shadow-sm hover:shadow-xl hover:-translate-y-1 
     transition-all duration-300 group
   `}>
-    <div className="flex justify-between items-start mb-4">
+    <div className="flex justify-between items-start mb-3">
       <div>
         <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 tracking-wide uppercase">
           {title}
         </p>
-        <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+        <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
           {value}
         </h3>
       </div>
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color} border ${border} transition-transform group-hover:scale-110 group-hover:rotate-3`}>
+      <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${color} border ${border} transition-transform group-hover:scale-110 group-hover:rotate-3`}>
         {icon}
       </div>
     </div>
     
     {/* Progress Bar */}
-    <div className="mb-3">
+    <div className="mb-2">
       <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-1.5 overflow-hidden">
         <div 
           className="h-full rounded-full transition-all duration-500"
@@ -743,7 +1018,7 @@ const StatCard = ({ title, value, icon, color, border, trend, progress }) => (
     </div>
     
     <div className="flex items-center justify-between">
-      <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300">
+      <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300">
         {trend}
       </span>
       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">

@@ -6,12 +6,33 @@ import Navbar from './Navbar';
 import { useAuth } from '../context/AuthContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import { Download, X } from 'lucide-react';
 
 const Layout = ({ darkMode, setDarkMode }) => {
   const location = useLocation();
   const { user } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('FocusFlow');
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showBanner, setShowBanner] = useState(false);
+
+  // Capture the browser's install prompt event
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setShowBanner(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') { setShowBanner(false); setInstallPrompt(null); }
+  };
 
   // Sync Workspace Name from Firestore
   useEffect(() => {
@@ -74,6 +95,34 @@ const Layout = ({ darkMode, setDarkMode }) => {
           setDarkMode={setDarkMode} 
           workspaceName={workspaceName}
         />
+
+        {/* PWA Install Banner */}
+        <AnimatePresence>
+          {showBanner && (
+            <motion.div
+              initial={{ y: -60, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -60, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="mx-4 mt-3 flex items-center gap-3 px-4 py-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-500/20 z-30"
+            >
+              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <Download size={16} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-black">Install FocusFlow</p>
+                <p className="text-indigo-200 text-xs">Add to home screen for the full app experience</p>
+              </div>
+              <button onClick={handleInstall}
+                className="px-4 py-1.5 bg-white text-indigo-600 rounded-xl text-xs font-black hover:bg-indigo-50 transition-colors shrink-0">
+                Install
+              </button>
+              <button onClick={() => setShowBanner(false)} className="text-indigo-300 hover:text-white transition-colors shrink-0">
+                <X size={16} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10 scroll-smooth bg-gradient-to-b from-transparent to-white/50 dark:to-black/50 relative pb-24 md:pb-6">
           <div className="max-w-7xl mx-auto w-full">

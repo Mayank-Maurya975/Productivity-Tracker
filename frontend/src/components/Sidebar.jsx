@@ -9,7 +9,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   LayoutDashboard, CheckSquare, Activity, Calendar, BarChart2, Settings, 
-  LogOut, Sun, Moon, Layers, Target, Repeat, GripVertical, Sprout, Wind, X, Sparkles
+  LogOut, Sun, Moon, Layers, Target, Repeat, GripVertical, Sprout, Wind, X, Sparkles, Zap
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -92,6 +92,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
     { id: 'habits', icon: <Activity size={18} />, text: 'Habits', path: '/habits' },
     { id: 'calendar', icon: <Calendar size={18} />, text: 'Calendar', path: '/calendar' },
     { id: 'reports', icon: <BarChart2 size={18} />, text: 'Reports', path: '/reports' },
+    { id: 'productivity', icon: <Zap size={18} />, text: 'Productivity', path: '/productivity' },
   ];
 
   const [items, setItems] = useState(() => {

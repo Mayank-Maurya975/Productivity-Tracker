@@ -1,6 +1,7 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { ThemeProvider } from './context/ThemeContext'; 
+import { ThemeProvider } from './context/ThemeContext';
+import { useEffect } from 'react';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
@@ -17,6 +18,14 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import StreakGarden from './pages/StreakGarden';
 import RelaxZone from './pages/RelaxZone';
+import Productivity from './pages/Productivity';
+
+// Fires a stronger haptic on every route change
+function RouteHaptic() {
+  const location = useLocation();
+  useEffect(() => { if (navigator.vibrate) navigator.vibrate(18); }, [location.pathname]);
+  return null;
+}
 
 function App() {
   const { user, loading } = useAuth();
@@ -43,6 +52,7 @@ function App() {
   return (
     <ThemeProvider>
       <Router>
+        <RouteHaptic />
         <Routes>
           {/* PUBLIC BOUTIQUE */}
           <Route
@@ -68,6 +78,7 @@ function App() {
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/productivity" element={<Productivity />} />
           </Route>
 
           {/* GLOBAL REDIRECT */}
