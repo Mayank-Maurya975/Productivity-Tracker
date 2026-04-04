@@ -5,7 +5,7 @@ import {
   Layers, ArrowRight, ShieldCheck, Sun, Moon, 
   Wind, Sprout, Target, ListTodo, Droplets, Music, 
   Calendar as CalendarIcon, Clock, Zap, Users, Folder, 
-  StickyNote, TrendingUp, Maximize2, Gamepad2, MousePointer2 
+  StickyNote, TrendingUp, Maximize2, Gamepad2, MousePointer2
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -418,48 +418,33 @@ const Login = () => {
 
       {/* LOGIN CARD */}
       <div className="relative z-50 w-full max-w-md p-6">
-        <div className="
-          w-full p-10 rounded-[48px] shadow-2xl relative overflow-hidden transition-all duration-300
-          bg-white/20 dark:bg-[#0a0a0a]/60 
-          backdrop-blur-xl 
-          border border-white/30 dark:border-white/10
-        ">
+        <div className="w-full p-10 rounded-[48px] shadow-2xl relative overflow-hidden transition-all duration-300 bg-white/20 dark:bg-[#0a0a0a]/60 backdrop-blur-xl border border-white/30 dark:border-white/10">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-6">
-                <div className="h-16 w-16 rounded-3xl flex items-center justify-center shadow-2xl bg-indigo-600 text-white shadow-indigo-600/40 transition-all transform hover:scale-105 hover:rotate-3">
-                  <Layers size={32} />
-                </div>
+              <div className="h-16 w-16 rounded-3xl flex items-center justify-center shadow-2xl bg-indigo-600 text-white shadow-indigo-600/40 transition-all transform hover:scale-105 hover:rotate-3">
+                <Layers size={32} />
+              </div>
             </div>
             <h2 className="text-xs font-bold text-white/90 tracking-[0.3em] uppercase mb-3 drop-shadow-sm">FocusFlow</h2>
-            <h1 className="text-5xl font-black text-white tracking-tighter mb-3 drop-shadow-lg">Welcome <br></br> </h1>
-            <p className="text-white/80 text-lg font-medium">It's Yours<br></br>Your productivity ecosystem awaits.</p>
+            <h1 className="text-5xl font-black text-white tracking-tighter mb-3 drop-shadow-lg">Welcome</h1>
+            <p className="text-white/80 text-lg font-medium">Your productivity ecosystem awaits.</p>
           </div>
 
           <div className="space-y-5">
-            <button
-              onClick={login}
-              disabled={isLoading}
-              className="group w-full flex items-center justify-between px-6 py-5 rounded-2xl 
-                bg-white/90 dark:bg-white/5 
-                hover:bg-white dark:hover:bg-white/10 
-                border-2 border-transparent dark:border-white/10 
-                text-sky-600 dark:text-white 
-                hover:scale-[1.02] active:scale-[0.98] 
-                font-bold text-lg shadow-xl transition-all duration-300 disabled:opacity-70"
-            >
+            <button onClick={login} disabled={isLoading}
+              className="group w-full flex items-center justify-between px-6 py-5 rounded-2xl bg-white/90 dark:bg-white/5 hover:bg-white dark:hover:bg-white/10 border-2 border-transparent dark:border-white/10 text-sky-600 dark:text-white hover:scale-[1.02] active:scale-[0.98] font-bold text-lg shadow-xl transition-all duration-300 disabled:opacity-70">
               <div className="flex items-center gap-4">
-                {isLoading ? (
-                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-t-transparent border-sky-600 dark:border-white" />
-                ) : (
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="h-6 w-6" alt="Google" />
-                )}
+                {isLoading
+                  ? <div className="animate-spin rounded-full h-6 w-6 border-2 border-t-transparent border-sky-600 dark:border-white"/>
+                  : <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="h-6 w-6" alt="Google"/>
+                }
                 <span>Sign in with Google</span>
               </div>
-              <ArrowRight className="w-5 h-5 text-sky-400 dark:text-white/50 group-hover:text-sky-600 dark:group-hover:text-white group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="w-5 h-5 text-sky-400 dark:text-white/50 group-hover:text-sky-600 dark:group-hover:text-white group-hover:translate-x-1 transition-all"/>
             </button>
             <div className="flex items-center justify-center gap-2 text-[11px] font-bold text-white/60 py-2">
-              <ShieldCheck size={12} className="text-white" />
-              <span>Secure Cloud Sync </span>
+              <ShieldCheck size={12} className="text-white"/>
+              <span>Secure Cloud Sync</span>
             </div>
           </div>
           <div className="mt-8 pt-6 border-t border-white/20 text-center">
@@ -469,7 +454,6 @@ const Login = () => {
           </div>
         </div>
       </div>
-
     </div>
   );
 };

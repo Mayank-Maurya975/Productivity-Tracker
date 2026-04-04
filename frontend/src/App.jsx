@@ -27,8 +27,41 @@ function RouteHaptic() {
   return null;
 }
 
+// Request notification permission once, then tell SW to start scheduling
+async function requestNotificationPermission() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    permission = await Notification.requestPermission();
+  }
+  if (permission !== 'granted') return;
+
+  const reg = await navigator.serviceWorker.ready;
+
+  // Tell SW to start interval-based scheduling (while app is open)
+  reg.active?.postMessage({ type: 'START_NOTIFICATIONS' });
+
+  // Periodic Background Sync — works even when app is fully closed
+  if ('periodicSync' in reg) {
+    try {
+      await reg.periodicSync.register('focusflow-reminder', {
+        minInterval: 3 * 60 * 60 * 1000, // 3 hours
+      });
+      console.log('[FocusFlow] Periodic Background Sync registered');
+    } catch (err) {
+      console.warn('[FocusFlow] Periodic Sync not available:', err.message);
+    }
+  }
+}
+
 function App() {
   const { user, loading } = useAuth();
+
+  // Request notification permission once user is logged in
+  useEffect(() => {
+    if (user) requestNotificationPermission();
+  }, [user]);
 
   // Optimized Loading Screen for OLED
   if (loading) {
